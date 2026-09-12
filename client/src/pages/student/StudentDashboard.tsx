@@ -197,10 +197,14 @@ export const StudentDashboard: React.FC = () => {
   const atRiskSubjects = data.subjectStats.filter((s) => s.risk !== 'SAFE');
   const safeSubjects = data.subjectStats.filter((s) => s.risk === 'SAFE');
 
-  // Filter today's classes by selected batch
+  // Filter today's classes by selected batch (supports section-specific codes like A1/A2, B1/B2)
   const filteredTodayClasses = data.todayClasses.filter((c: any) => {
     if (c.batch === 'ALL' || !c.batch) return true;
-    return activeBatchFilter === 'ALL' || c.batch === activeBatchFilter;
+    if (activeBatchFilter === 'ALL') return true;
+    if (c.batch === activeBatchFilter) return true;
+    if (activeBatchFilter.endsWith('1') && c.batch.endsWith('1')) return true;
+    if (activeBatchFilter.endsWith('2') && c.batch.endsWith('2')) return true;
+    return false;
   });
 
   return (
@@ -501,7 +505,7 @@ export const StudentDashboard: React.FC = () => {
                         </span>
                         {hasBatchTag && (
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/15 text-white border border-white/20 font-sub font-medium">
-                            {item.batch === 'B1' ? 'Batch 1' : 'Batch 2'}
+                            {item.batch.endsWith('1') ? 'Batch 1' : item.batch.endsWith('2') ? 'Batch 2' : item.batch} ({item.batch})
                           </span>
                         )}
                         {/* Skip Verdict Pill */}

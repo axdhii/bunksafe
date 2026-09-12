@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Shield, ArrowRight, AlertCircle, Sparkles, Lock } from 'lucide-react';
+import { Shield, ArrowRight, AlertCircle, Lock } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 
 export const AdminLoginPage: React.FC = () => {
@@ -27,11 +27,6 @@ export const AdminLoginPage: React.FC = () => {
     }
   };
 
-  const handleFillDemo = () => {
-    setEmail('admin@college.edu');
-    setPassword('Admin@123');
-  };
-
   return (
     <div className="min-h-screen flex flex-col justify-center items-center px-4 py-8 aurora-blur-bg relative">
       <div className="w-full max-w-md space-y-6 z-10">
@@ -50,16 +45,8 @@ export const AdminLoginPage: React.FC = () => {
 
         {/* Login Card */}
         <div className="liquid-glass-card rounded-3xl p-6 sm:p-8 border border-white/10 shadow-2xl">
-          <div className="flex items-center justify-between mb-5">
+          <div className="mb-5">
             <h2 className="text-lg font-bold text-white font-sans">Administrator Login</h2>
-            <button
-              type="button"
-              onClick={handleFillDemo}
-              className="text-[11px] font-sub text-zinc-400 hover:text-white hover:underline flex items-center gap-1"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-zinc-300" />
-              <span>Fill Demo (admin@college.edu)</span>
-            </button>
           </div>
 
           {error && (
@@ -79,7 +66,6 @@ export const AdminLoginPage: React.FC = () => {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@college.edu"
                 className="w-full px-4 py-3 rounded-xl bg-white/[0.04] border border-white/10 text-white text-sm placeholder:text-zinc-500 focus:outline-none focus:border-white focus:ring-1 focus:ring-white transition-all font-sans"
               />
             </div>
@@ -94,7 +80,6 @@ export const AdminLoginPage: React.FC = () => {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
                   className="w-full px-4 py-3 rounded-xl bg-white/[0.04] border border-white/10 text-white text-sm placeholder:text-zinc-500 focus:outline-none focus:border-white focus:ring-1 focus:ring-white transition-all font-sans"
                 />
                 <Lock className="w-4 h-4 text-zinc-500 absolute right-3.5 top-3.5 pointer-events-none" />
