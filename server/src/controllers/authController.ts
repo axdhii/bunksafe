@@ -176,22 +176,7 @@ export async function studentLogin(req: Request, res: Response): Promise<void> {
         },
       });
     } catch (dbErr) {
-      console.warn('Database offline/unreachable, activating standalone demo mode for:', cleanUsn);
-      if (cleanUsn === '1MS21CS001' || cleanUsn.length > 3) {
-        student = {
-          id: 'demo-student-id-1',
-          userId: 'demo-user-id-1',
-          usn: cleanUsn,
-          name: cleanUsn === '1MS21CS001' ? 'Aarav Sharma' : 'Student ' + cleanUsn,
-          email: `${cleanUsn.toLowerCase()}@college.edu`,
-          semesterId: 'sem-5',
-          branchId: 'branch-cse',
-          sectionId: 'sec-a',
-          semester: { id: 'sem-5', number: semNum || 5, name: `Semester ${semNum || 5}` },
-          branch: { id: 'branch-cse', code: cleanBranch || 'CSE', name: 'Computer Science & Engineering' },
-          section: { id: 'sec-a', name: cleanSection || 'A' },
-        };
-      }
+      console.error('Database error during student login:', dbErr);
     }
 
     if (!student) {
@@ -270,36 +255,21 @@ export async function adminLogin(req: Request, res: Response): Promise<void> {
     }
 
     const cleanEmail = String(email).trim().toLowerCase();
-    let admin: any;
-    try {
-      admin = await prisma.admin.findUnique({
-        where: { email: cleanEmail },
-        include: { user: true },
-      });
-    } catch (dbErr) {
-      console.warn('Database offline/unreachable, activating standalone admin demo mode.');
-    }
 
-    if (!admin && cleanEmail === 'admin@college.edu' && password === 'Admin@123') {
-      admin = {
-        id: 'demo-admin-id-1',
-        userId: 'demo-admin-user-id',
-        email: 'admin@college.edu',
-        name: 'Chief Academic Administrator',
-      };
-    }
+    const admin = await prisma.admin.findUnique({
+      where: { email: cleanEmail },
+      include: { user: true },
+    });
 
-    if (!admin) {
+    if (!admin || !admin.passwordHash) {
       res.status(401).json({ error: 'Invalid email or password.' });
       return;
     }
 
-    if (admin.passwordHash) {
-      const isValidPassword = await bcrypt.compare(password, admin.passwordHash);
-      if (!isValidPassword) {
-        res.status(401).json({ error: 'Invalid email or password.' });
-        return;
-      }
+    const isValidPassword = await bcrypt.compare(password, admin.passwordHash);
+    if (!isValidPassword) {
+      res.status(401).json({ error: 'Invalid email or password.' });
+      return;
     }
 
     const token = generateToken({
