@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="auroraGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F2FE" />
+      <stop offset="50%" stop-color="#4FACFE" />
+      <stop offset="100%" stop-color="#8B5CF6" />
+    </linearGradient>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A" />
+      <stop offset="100%" stop-color="#080C16" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+  
+  <!-- Rounded Base -->
+  <rect width="512" height="512" rx="128" fill="url(#bgGrad)" stroke="#1E293B" stroke-width="8" />
+  
+  <!-- Outer Ring Accent -->
+  <circle cx="256" cy="256" r="170" stroke="url(#auroraGlow)" stroke-width="12" stroke-linecap="round" stroke-dasharray="800 280" filter="url(#glow)" opacity="0.85" />
+  
+  <!-- Dynamic Attendance Spark / Gauge -->
+  <path d="M170 270L230 330L345 190" stroke="url(#auroraGlow)" stroke-width="36" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)" />
+  
+  <!-- Glowing Nodes -->
+  <circle cx="256" cy="86" r="14" fill="#00F2FE" filter="url(#glow)" />
+  <circle cx="345" cy="190" r="12" fill="#38EF7D" filter="url(#glow)" />
+</svg>

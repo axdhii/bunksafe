@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Production builds
+dist/
+*/dist/
+build/
+*/build/
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+server/.env
+client/.env
+
+# SQLite local databases
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+server/dev.db
+server/dev.db-journal
+
+# Local tools and binaries
+tools/
+
+# OS and Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Vercel and Railway artifacts
+.vercel
+.railway

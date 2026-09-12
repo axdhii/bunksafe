@@ -1,0 +1,235 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  role      String   // "STUDENT" | "ADMIN"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  student   Student?
+  admin     Admin?
+}
+
+model Admin {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email        String   @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime @default(now())
+}
+
+model AcademicYear {
+  id         String      @id @default(uuid())
+  name       String      @unique // e.g. "2024-2025"
+  startDate  DateTime
+  endDate    DateTime
+  isCurrent  Boolean     @default(true)
+  timetables Timetable[]
+}
+
+model Semester {
+  id         String      @id @default(uuid())
+  number     Int         @unique // 1..8
+  name       String      // e.g. "Semester 5"
+  sections   Section[]
+  subjects   Subject[]
+  students   Student[]
+  timetables Timetable[]
+}
+
+model Branch {
+  id         String      @id @default(uuid())
+  code       String      @unique // e.g. "CSE"
+  name       String      // e.g. "Computer Science & Engineering"
+  sections   Section[]
+  subjects   Subject[]
+  students   Student[]
+  timetables Timetable[]
+}
+
+model Section {
+  id         String      @id @default(uuid())
+  name       String      // e.g. "A", "B"
+  semesterId String
+  semester   Semester    @relation(fields: [semesterId], references: [id])
+  branchId   String
+  branch     Branch      @relation(fields: [branchId], references: [id])
+  students   Student[]
+  timetables Timetable[]
+
+  @@unique([name, semesterId, branchId])
+}
+
+model Subject {
+  id               String           @id @default(uuid())
+  code             String           // e.g. "21CS51"
+  name             String           // e.g. "Database Management Systems"
+  credits          Int              @default(4)
+  semesterId       String
+  semester         Semester         @relation(fields: [semesterId], references: [id])
+  branchId         String
+  branch           Branch           @relation(fields: [branchId], references: [id])
+  minimumThreshold Float            @default(85.0)
+  timetableEntries TimetableEntry[]
+  attendances      Attendance[]
+
+  @@unique([code, semesterId, branchId])
+}
+
+model Timetable {
+  id             String           @id @default(uuid())
+  academicYearId String
+  academicYear   AcademicYear     @relation(fields: [academicYearId], references: [id])
+  semesterId     String
+  semester       Semester         @relation(fields: [semesterId], references: [id])
+  branchId       String
+  branch         Branch           @relation(fields: [branchId], references: [id])
+  sectionId      String
+  section        Section          @relation(fields: [sectionId], references: [id])
+  isActive       Boolean          @default(true)
+  effectiveFrom  DateTime         @default(now())
+  entries        TimetableEntry[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+}
+
+model TimetableEntry {
+  id          String       @id @default(uuid())
+  timetableId String
+  timetable   Timetable    @relation(fields: [timetableId], references: [id], onDelete: Cascade)
+  dayOfWeek   Int          // 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday, 7=Sunday
+  startTime   String       // "09:00" (HH:MM)
+  endTime     String       // "10:00" (HH:MM)
+  subjectId   String?
+  subject     Subject?     @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  title       String?      // Custom label for breaks or events, e.g. "Tea Break", "Lunch Break"
+  faculty     String?
+  room        String?
+  type        String       @default("LECTURE") // "LECTURE" | "LAB" | "TUTORIAL" | "INTERVAL" | "LUNCH" | "BREAK"
+  batch       String?      @default("ALL")     // "ALL" | "B1" | "B2" | "B3"
+  attendances Attendance[]
+
+  @@index([dayOfWeek, startTime])
+}
+
+model Student {
+  id                     String                 @id @default(uuid())
+  userId                 String                 @unique
+  user                   User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  usn                    String                 @unique // e.g. "1MS21CS001"
+  name                   String
+  email                  String?
+  phone                  String?
+  passwordHash           String?
+  batch                  String?                @default("B1") // e.g. "B1", "B2"
+  semesterId             String
+  semester               Semester               @relation(fields: [semesterId], references: [id])
+  branchId               String
+  branch                 Branch                 @relation(fields: [branchId], references: [id])
+  sectionId              String
+  section                Section                @relation(fields: [sectionId], references: [id])
+  active                 Boolean                @default(true)
+  createdAt              DateTime               @default(now())
+  attendances            Attendance[]
+  notificationPreference NotificationPreference?
+  pushSubscriptions      PushSubscription[]
+  notifications          Notification[]
+
+  @@index([usn])
+  @@index([semesterId, branchId, sectionId])
+}
+
+model Attendance {
+  id               String          @id @default(uuid())
+  studentId        String
+  student          Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subjectId        String
+  subject          Subject         @relation(fields: [subjectId], references: [id])
+  timetableEntryId String?
+  timetableEntry   TimetableEntry? @relation(fields: [timetableEntryId], references: [id])
+  date             String          // "YYYY-MM-DD"
+  status           String          // "PRESENT" | "ABSENT" | "CANCELLED" | "RESCHEDULED" | "HOLIDAY"
+  remarks          String?
+  syncId           String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@unique([studentId, subjectId, date, timetableEntryId])
+  @@index([studentId, date])
+  @@index([studentId, subjectId])
+}
+
+model NotificationPreference {
+  id                    String   @id @default(uuid())
+  studentId             String   @unique
+  student               Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  classReminders        Boolean  @default(true)
+  reminderMinutesBefore Int      @default(30)
+  attendanceWarnings    Boolean  @default(true)
+  skipWarnings          Boolean  @default(true)
+  recoveryNotifications Boolean  @default(true)
+  dailySummary          Boolean  @default(true)
+  weeklySummary         Boolean  @default(true)
+  quietHoursEnabled     Boolean  @default(true)
+  quietHoursStart       String   @default("23:00") // "23:00"
+  quietHoursEnd         String   @default("07:00") // "07:00"
+}
+
+model PushSubscription {
+  id        String   @id @default(uuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  endpoint  String
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@unique([studentId, endpoint])
+}
+
+model Notification {
+  id              String   @id @default(uuid())
+  studentId       String
+  student         Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  title           String
+  message         String
+  category        String   // "CLASS_REMINDER" | "ATTENDANCE_WARNING" | "SKIP_WARNING" | "RECOVERY" | "DAILY_SUMMARY" | "WEEKLY_SUMMARY" | "RISK_CHANGE" | "SYSTEM"
+  isRead          Boolean  @default(false)
+  deduplicationKey String?
+  createdAt       DateTime @default(now())
+
+  @@index([studentId, isRead])
+  @@index([studentId, deduplicationKey])
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  actorEmail   String
+  actorRole    String
+  action       String   // "STUDENT_CREATED", "TIMETABLE_UPLOADED", "SUBJECT_MODIFIED", etc.
+  targetEntity String?
+  targetId     String?
+  details      String?  // JSON formatted details
+  ipAddress    String?
+  createdAt    DateTime @default(now())
+
+  @@index([actorEmail])
+  @@index([createdAt])
+}
+
+model SystemSetting {
+  id          String   @id @default(uuid())
+  key         String   @unique // "MINIMUM_ATTENDANCE_THRESHOLD"
+  value       String   // "75.0"
+  description String?
+}
