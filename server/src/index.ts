@@ -80,9 +80,11 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   res.status(status).json({ error: message });
 });
 
-// Start Server
-app.listen(PORT, () => {
-  console.log(`✨ Aurora Attendance Backend running on http://localhost:${PORT}`);
-});
+// Start Server (only when not running inside Vercel serverless runtime)
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`✨ Aurora Attendance Backend running on http://localhost:${PORT}`);
+  });
+}
 
 export default app;
