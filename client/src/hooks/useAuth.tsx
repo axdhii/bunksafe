@@ -15,6 +15,7 @@ interface AuthContextType {
     sectionName?: string,
     password?: string
   ) => Promise<void>;
+  activateStudent: (usn: string, email: string, password: string) => Promise<void>;
   loginAdmin: (email: string, password: string) => Promise<void>;
   login: (token: string, user: User, student: StudentProfile) => void;
   logout: () => Promise<void>;
@@ -38,21 +39,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('aurora_token'));
   const [isLoading, setIsLoading] = useState(true);
 
-  // Validate session on load
+  // Validate session on load via httpOnly cookie
   useEffect(() => {
     const checkSession = async () => {
-      const storedToken = localStorage.getItem('aurora_token');
-      if (!storedToken) {
-        setIsLoading(false);
-        return;
-      }
       try {
         const res = await apiRequest('/auth/me');
         setUser(res.user);
-        if (res.student) setStudent(res.student);
-        if (res.admin) setAdmin(res.admin);
+        if (res.student) {
+          setStudent(res.student);
+          localStorage.setItem('aurora_student', JSON.stringify(res.student));
+        }
+        if (res.admin) {
+          setAdmin(res.admin);
+          localStorage.setItem('aurora_admin', JSON.stringify(res.admin));
+        }
+        localStorage.setItem('aurora_user', JSON.stringify(res.user));
       } catch (err) {
-        // Token invalid, clear state
+        // Cookie expired/invalid or unauthenticated
         localStorage.removeItem('aurora_token');
         localStorage.removeItem('aurora_user');
         localStorage.removeItem('aurora_student');
@@ -79,10 +82,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       method: 'POST',
       data: { usn, semesterNumber, branchCode, sectionName, password },
     });
-    localStorage.setItem('aurora_token', data.token);
+    if (data.token) {
+      localStorage.setItem('aurora_token', data.token);
+      setToken(data.token);
+    }
     localStorage.setItem('aurora_user', JSON.stringify(data.user));
     localStorage.setItem('aurora_student', JSON.stringify(data.student));
-    setToken(data.token);
+    setUser(data.user);
+    setStudent(data.student);
+    setAdmin(null);
+  };
+
+  const activateStudent = async (usn: string, email: string, password: string) => {
+    const data = await apiRequest('/auth/student/activate', {
+      method: 'POST',
+      data: { usn, email, password },
+    });
+    if (data.token) {
+      localStorage.setItem('aurora_token', data.token);
+      setToken(data.token);
+    }
+    localStorage.setItem('aurora_user', JSON.stringify(data.user));
+    localStorage.setItem('aurora_student', JSON.stringify(data.student));
     setUser(data.user);
     setStudent(data.student);
     setAdmin(null);
@@ -93,20 +114,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       method: 'POST',
       data: { email, password },
     });
-    localStorage.setItem('aurora_token', data.token);
+    if (data.token) {
+      localStorage.setItem('aurora_token', data.token);
+      setToken(data.token);
+    }
     localStorage.setItem('aurora_user', JSON.stringify(data.user));
     localStorage.setItem('aurora_admin', JSON.stringify(data.admin));
-    setToken(data.token);
     setUser(data.user);
     setAdmin(data.admin);
     setStudent(null);
   };
 
-  const login = (newToken: string, newUser: User, newStudent: StudentProfile) => {
-    localStorage.setItem('aurora_token', newToken);
+  const login = (_newToken: string, newUser: User, newStudent: StudentProfile) => {
+    if (_newToken) {
+      localStorage.setItem('aurora_token', _newToken);
+      setToken(_newToken);
+    }
     localStorage.setItem('aurora_user', JSON.stringify(newUser));
     localStorage.setItem('aurora_student', JSON.stringify(newStudent));
-    setToken(newToken);
     setUser(newUser);
     setStudent(newStudent);
     setAdmin(null);
@@ -136,6 +161,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         token,
         isLoading,
         loginStudent,
+        activateStudent,
         loginAdmin,
         login,
         logout,

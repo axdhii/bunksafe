@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS "Student" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS "idx_student_usn" ON "Student"("usn");
+-- CREATE INDEX IF NOT EXISTS "idx_student_usn" ON "Student"("usn"); -- Redundant with UNIQUE constraint
 CREATE INDEX IF NOT EXISTS "idx_student_sem_branch_sec" ON "Student"("semesterId", "branchId", "sectionId");
 
 -- 12. Attendance
@@ -130,6 +130,8 @@ CREATE TABLE IF NOT EXISTS "Attendance" (
 
 CREATE INDEX IF NOT EXISTS "idx_attendance_student_date" ON "Attendance"("studentId", "date");
 CREATE INDEX IF NOT EXISTS "idx_attendance_student_subject" ON "Attendance"("studentId", "subjectId");
+CREATE INDEX IF NOT EXISTS "idx_attendance_student_status" ON "Attendance"("studentId", "status");
+CREATE INDEX IF NOT EXISTS "idx_attendance_status" ON "Attendance"("status");
 
 -- 13. Notification Preference
 CREATE TABLE IF NOT EXISTS "NotificationPreference" (
@@ -173,6 +175,7 @@ CREATE TABLE IF NOT EXISTS "Notification" (
 
 CREATE INDEX IF NOT EXISTS "idx_notification_student_read" ON "Notification"("studentId", "isRead");
 CREATE INDEX IF NOT EXISTS "idx_notification_student_dedup" ON "Notification"("studentId", "deduplicationKey");
+CREATE INDEX IF NOT EXISTS "idx_notification_student_time" ON "Notification"("studentId", "createdAt");
 
 -- 16. Audit Log
 CREATE TABLE IF NOT EXISTS "AuditLog" (

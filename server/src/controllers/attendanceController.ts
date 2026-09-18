@@ -22,27 +22,29 @@ export async function getDashboard(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // 2. Fetch global threshold setting
-    const thresholdSetting = await prisma.systemSetting.findUnique({
-      where: { key: 'MINIMUM_ATTENDANCE_THRESHOLD' },
-    });
+    // PERF-2: Run independent queries in parallel instead of sequentially
+    const [thresholdSetting, subjects, attendanceRecords] = await Promise.all([
+      // 2. Fetch global threshold setting
+      prisma.systemSetting.findUnique({
+        where: { key: 'MINIMUM_ATTENDANCE_THRESHOLD' },
+      }),
+      // 3. Fetch all subjects for this semester & branch
+      prisma.subject.findMany({
+        where: {
+          semesterId: student.semesterId,
+          branchId: student.branchId,
+        },
+        orderBy: { code: 'asc' },
+      }),
+      // 4. Fetch all attendance records for this student
+      prisma.attendance.findMany({
+        where: { studentId },
+        include: { subject: true },
+        orderBy: { date: 'asc' },
+      }),
+    ]);
+
     const defaultThreshold = thresholdSetting ? parseFloat(thresholdSetting.value) : 85.0;
-
-    // 3. Fetch all subjects for this semester & branch
-    const subjects = await prisma.subject.findMany({
-      where: {
-        semesterId: student.semesterId,
-        branchId: student.branchId,
-      },
-      orderBy: { code: 'asc' },
-    });
-
-    // 4. Fetch all attendance records for this student
-    const attendanceRecords = await prisma.attendance.findMany({
-      where: { studentId },
-      include: { subject: true },
-      orderBy: { date: 'asc' },
-    });
 
     // 5. Compute per-subject metrics
     let totalConducted = 0;
@@ -120,22 +122,29 @@ export async function getDashboard(req: Request, res: Response): Promise<void> {
     const dayOfWeek = jsDay === 0 ? 7 : jsDay;
     const todayDateStr = today.toISOString().split('T')[0];
 
-    // Find active timetable for student's section
-    const timetable = await prisma.timetable.findFirst({
-      where: {
-        sectionId: student.sectionId,
-        semesterId: student.semesterId,
-        branchId: student.branchId,
-        isActive: true,
-      },
-      include: {
-        entries: {
-          where: { dayOfWeek },
-          include: { subject: true },
-          orderBy: { startTime: 'asc' },
+    // PERF-2: Run timetable + notification count in parallel
+    const [timetable, unreadNotificationCount] = await Promise.all([
+      // Find active timetable for student's section
+      prisma.timetable.findFirst({
+        where: {
+          sectionId: student.sectionId,
+          semesterId: student.semesterId,
+          branchId: student.branchId,
+          isActive: true,
         },
-      },
-    });
+        include: {
+          entries: {
+            where: { dayOfWeek },
+            include: { subject: true },
+            orderBy: { startTime: 'asc' },
+          },
+        },
+      }),
+      // 9. Count unread notifications
+      prisma.notification.count({
+        where: { studentId, isRead: false },
+      }),
+    ]);
 
     const todayClasses = (timetable?.entries || []).map((entry) => {
       // Check if student has already marked attendance for this class today
@@ -177,11 +186,6 @@ export async function getDashboard(req: Request, res: Response): Promise<void> {
       };
     });
 
-    // 9. Count unread notifications
-    const unreadNotificationCount = await prisma.notification.count({
-      where: { studentId, isRead: false },
-    });
-
     res.json({
       student: {
         id: student.id,
@@ -213,222 +217,9 @@ export async function getDashboard(req: Request, res: Response): Promise<void> {
       unreadNotificationCount,
     });
   } catch (error: any) {
-    console.warn('Database offline/unreachable, providing standalone demo dashboard dataset.');
-    res.json({
-      student: {
-        id: 'demo-student-id-1',
-        usn: '1MS21CS001',
-        name: 'Aarav Sharma',
-        email: 'aarav.sharma@college.edu',
-        semester: { id: 'sem-5', number: 5, name: 'Semester 5' },
-        branch: { id: 'branch-cse', code: 'CSE', name: 'Computer Science & Engineering' },
-        section: { id: 'sec-a', name: 'A' },
-      },
-      threshold: 85.0,
-      overall: {
-        conducted: 104,
-        attended: 85,
-        absent: 19,
-        percentage: 81.7,
-        risk: 'SAFE',
-        safeSkips: 9,
-        recoveryRequired: 0,
-        trend: 'STABLE',
-      },
-      streaks: {
-        current: 5,
-        longest: 7,
-        consistencyScore: 82,
-      },
-      todayClasses: [
-        {
-          id: 'slot-1',
-          timetableEntryId: 'slot-1',
-          dayOfWeek: 1,
-          startTime: '09:00',
-          endTime: '10:00',
-          type: 'LECTURE',
-          faculty: 'Dr. V. Raman',
-          room: 'LH-301',
-          subject: { id: 'sub-dbms', code: '21CS51', name: 'Database Management Systems', minimumThreshold: 85 },
-          risk: 'SAFE',
-          safeSkips: 2,
-          recoveryRequired: 0,
-          isSafeToSkip: true,
-        },
-        {
-          id: 'slot-2',
-          timetableEntryId: 'slot-2',
-          dayOfWeek: 1,
-          startTime: '10:00',
-          endTime: '11:00',
-          type: 'LECTURE',
-          faculty: 'Prof. K. Sharma',
-          room: 'LH-301',
-          subject: { id: 'sub-os', code: '21CS52', name: 'Operating Systems', minimumThreshold: 85 },
-          risk: 'CRITICAL',
-          safeSkips: 0,
-          recoveryRequired: 3,
-          isSafeToSkip: false,
-        },
-        {
-          id: 'slot-3',
-          timetableEntryId: 'slot-3',
-          dayOfWeek: 1,
-          startTime: '11:15',
-          endTime: '12:15',
-          type: 'LECTURE',
-          faculty: 'Dr. M. Iyer',
-          room: 'LH-301',
-          subject: { id: 'sub-daa', code: '21CS53', name: 'Design & Analysis of Algorithms', minimumThreshold: 85 },
-          risk: 'SAFE',
-          safeSkips: 4,
-          recoveryRequired: 0,
-          isSafeToSkip: true,
-        },
-        {
-          id: 'slot-4',
-          timetableEntryId: 'slot-4',
-          dayOfWeek: 1,
-          startTime: '13:00',
-          endTime: '14:00',
-          type: 'LECTURE',
-          faculty: 'Prof. S. Nair',
-          room: 'LH-301',
-          subject: { id: 'sub-cn', code: '21CS54', name: 'Computer Networks', minimumThreshold: 85 },
-          risk: 'WARNING',
-          safeSkips: 0,
-          recoveryRequired: 0,
-          isSafeToSkip: false,
-        },
-        {
-          id: 'slot-5',
-          timetableEntryId: 'slot-5',
-          dayOfWeek: 1,
-          startTime: '14:00',
-          endTime: '16:00',
-          type: 'LAB',
-          faculty: 'Dr. V. Raman',
-          room: 'Lab-2',
-          subject: { id: 'sub-dbms-lab', code: '21CSL56', name: 'DBMS & Query Optimization Lab', minimumThreshold: 85 },
-          risk: 'SAFE',
-          safeSkips: 2,
-          recoveryRequired: 0,
-          isSafeToSkip: true,
-        },
-      ],
-      subjectStats: [
-        {
-          id: 'sub-dbms',
-          code: '21CS51',
-          name: 'Database Management Systems',
-          credits: 4,
-          minimumThreshold: 85,
-          conducted: 24,
-          attended: 20,
-          absent: 4,
-          cancelled: 1,
-          percentage: 83.3,
-          risk: 'SAFE',
-          safeSkips: 2,
-          recoveryRequired: 0,
-          nextIfAttended: 84.0,
-          nextIfMissed: 80.0,
-          trend: 'UP',
-        },
-        {
-          id: 'sub-os',
-          code: '21CS52',
-          name: 'Operating Systems',
-          credits: 4,
-          minimumThreshold: 85,
-          conducted: 21,
-          attended: 15,
-          absent: 6,
-          cancelled: 0,
-          percentage: 71.4,
-          risk: 'CRITICAL',
-          safeSkips: 0,
-          recoveryRequired: 3,
-          nextIfAttended: 72.7,
-          nextIfMissed: 68.2,
-          trend: 'DOWN',
-        },
-        {
-          id: 'sub-daa',
-          code: '21CS53',
-          name: 'Design & Analysis of Algorithms',
-          credits: 4,
-          minimumThreshold: 85,
-          conducted: 25,
-          attended: 22,
-          absent: 3,
-          cancelled: 0,
-          percentage: 88.0,
-          risk: 'SAFE',
-          safeSkips: 4,
-          recoveryRequired: 0,
-          nextIfAttended: 88.5,
-          nextIfMissed: 84.6,
-          trend: 'UP',
-        },
-        {
-          id: 'sub-cn',
-          code: '21CS54',
-          name: 'Computer Networks',
-          credits: 3,
-          minimumThreshold: 85,
-          conducted: 18,
-          attended: 14,
-          absent: 4,
-          cancelled: 0,
-          percentage: 77.8,
-          risk: 'WARNING',
-          safeSkips: 0,
-          recoveryRequired: 0,
-          nextIfAttended: 78.9,
-          nextIfMissed: 73.7,
-          trend: 'STABLE',
-        },
-        {
-          id: 'sub-se',
-          code: '21CS55',
-          name: 'Software Engineering & Agile',
-          credits: 3,
-          minimumThreshold: 85,
-          conducted: 16,
-          attended: 15,
-          absent: 1,
-          cancelled: 0,
-          percentage: 93.8,
-          risk: 'SAFE',
-          safeSkips: 4,
-          recoveryRequired: 0,
-          nextIfAttended: 94.1,
-          nextIfMissed: 88.2,
-          trend: 'UP',
-        },
-        {
-          id: 'sub-dbms-lab',
-          code: '21CSL56',
-          name: 'DBMS & Query Optimization Lab',
-          credits: 2,
-          minimumThreshold: 85,
-          conducted: 6,
-          attended: 6,
-          absent: 0,
-          cancelled: 0,
-          percentage: 100.0,
-          risk: 'SAFE',
-          safeSkips: 2,
-          recoveryRequired: 0,
-          nextIfAttended: 100.0,
-          nextIfMissed: 85.7,
-          trend: 'STABLE',
-        },
-      ],
-      unreadNotificationCount: 2,
-    });
+    // PERF-8: Return a proper error instead of hardcoded demo data
+    console.error('getDashboard error:', error);
+    res.status(500).json({ error: 'Failed to load dashboard data. Please try again.' });
   }
 }
 
@@ -457,16 +248,15 @@ export async function markAttendance(req: Request, res: Response): Promise<void>
       return;
     }
 
-    // Previous attendance state for smart notification trigger
-    const previousRecords = await prisma.attendance.findMany({
-      where: { studentId, subjectId },
-    });
-    let prevAttended = 0;
-    let prevConducted = 0;
-    for (const r of previousRecords) {
-      if (r.status === 'PRESENT') { prevAttended++; prevConducted++; }
-      else if (r.status === 'ABSENT') { prevConducted++; }
-    }
+    // PERF-4: Use count queries instead of loading all records into memory
+    const [prevConducted, prevAttended] = await Promise.all([
+      prisma.attendance.count({
+        where: { studentId, subjectId, status: { in: ['PRESENT', 'ABSENT'] } },
+      }),
+      prisma.attendance.count({
+        where: { studentId, subjectId, status: 'PRESENT' },
+      }),
+    ]);
     const prevMetrics = calculateAttendance(prevAttended, prevConducted, subject.minimumThreshold);
 
     // Upsert attendance record
@@ -496,16 +286,15 @@ export async function markAttendance(req: Request, res: Response): Promise<void>
       },
     });
 
-    // Compute new metrics for subject
-    const updatedRecords = await prisma.attendance.findMany({
-      where: { studentId, subjectId },
-    });
-    let newAttended = 0;
-    let newConducted = 0;
-    for (const r of updatedRecords) {
-      if (r.status === 'PRESENT') { newAttended++; newConducted++; }
-      else if (r.status === 'ABSENT') { newConducted++; }
-    }
+    // Compute new metrics using count queries
+    const [newConducted, newAttended] = await Promise.all([
+      prisma.attendance.count({
+        where: { studentId, subjectId, status: { in: ['PRESENT', 'ABSENT'] } },
+      }),
+      prisma.attendance.count({
+        where: { studentId, subjectId, status: 'PRESENT' },
+      }),
+    ]);
     const newMetrics = calculateAttendance(newAttended, newConducted, subject.minimumThreshold);
 
     // Trigger Smart Notifications on state transitions
@@ -632,6 +421,9 @@ export async function getAttendanceHistory(req: Request, res: Response): Promise
       whereClause.date = { ...whereClause.date, lte: endDate };
     }
 
+    const take = Math.min(Math.max(1, Number(req.query.limit) || 100), 200);
+    const skip = Math.max(0, Number(req.query.offset) || 0);
+
     const records = await prisma.attendance.findMany({
       where: whereClause,
       include: {
@@ -639,6 +431,8 @@ export async function getAttendanceHistory(req: Request, res: Response): Promise
         timetableEntry: true,
       },
       orderBy: { date: 'desc' },
+      take,
+      skip,
     });
 
     const formatted = records.map((r) => ({
@@ -741,37 +535,46 @@ export async function syncOfflineAttendance(req: Request, res: Response): Promis
       return;
     }
 
-    let syncedCount = 0;
-    for (const item of items) {
-      if (!item.subjectId || !item.date || !item.status) continue;
+    // PERF-5: Batch all upserts in a single transaction instead of sequential calls
+    const validItems = items.filter(
+      (item: any) => item.subjectId && item.date && item.status
+    );
 
-      await prisma.attendance.upsert({
-        where: {
-          studentId_subjectId_date_timetableEntryId: {
+    if (validItems.length === 0) {
+      res.json({ success: true, synced: 0 });
+      return;
+    }
+
+    await prisma.$transaction(
+      validItems.map((item: any) =>
+        prisma.attendance.upsert({
+          where: {
+            studentId_subjectId_date_timetableEntryId: {
+              studentId,
+              subjectId: item.subjectId,
+              date: item.date,
+              timetableEntryId: item.timetableEntryId || '',
+            },
+          },
+          update: {
+            status: item.status,
+            remarks: item.remarks,
+            syncId: item.syncId,
+            updatedAt: new Date(),
+          },
+          create: {
             studentId,
             subjectId: item.subjectId,
+            timetableEntryId: item.timetableEntryId || null,
             date: item.date,
-            timetableEntryId: item.timetableEntryId || '',
+            status: item.status,
+            remarks: item.remarks,
+            syncId: item.syncId,
           },
-        },
-        update: {
-          status: item.status,
-          remarks: item.remarks,
-          syncId: item.syncId,
-          updatedAt: new Date(),
-        },
-        create: {
-          studentId,
-          subjectId: item.subjectId,
-          timetableEntryId: item.timetableEntryId || null,
-          date: item.date,
-          status: item.status,
-          remarks: item.remarks,
-          syncId: item.syncId,
-        },
-      });
-      syncedCount++;
-    }
+        })
+      )
+    );
+    const syncedCount = validItems.length;
 
     res.json({ success: true, synced: syncedCount });
   } catch (error: any) {

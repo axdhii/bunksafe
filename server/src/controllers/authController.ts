@@ -13,15 +13,108 @@ export async function registerStudent(req: Request, res: Response): Promise<void
       return;
     }
 
+    if (String(password).length < 8) {
+      res.status(400).json({ error: 'Password must be at least 8 characters long for security.' });
+      return;
+    }
+
     const cleanUsn = String(usn).trim().toUpperCase();
     const cleanName = String(name).trim();
     const cleanPhone = phone ? String(phone).trim() : null;
     const cleanEmail = email ? String(email).trim().toLowerCase() : `${cleanUsn.toLowerCase()}@college.edu`;
 
     // Check if USN already exists
-    const existingStudent = await prisma.student.findUnique({ where: { usn: cleanUsn } });
+    const existingStudent = await prisma.student.findUnique({
+      where: { usn: cleanUsn },
+      include: {
+        semester: true,
+        branch: true,
+        section: true,
+      },
+    });
+
     if (existingStudent) {
-      res.status(400).json({ error: `A student account with USN ${cleanUsn} is already registered. Please log in.` });
+      if (existingStudent.passwordHash) {
+        res.status(400).json({ error: `A student account with USN ${cleanUsn} is already registered. Please sign in.` });
+        return;
+      }
+
+      // Preloaded on roster without password: verify student's name to prevent impostor claiming
+      const dbNameNorm = existingStudent.name.trim().toLowerCase().replace(/\s+/g, ' ');
+      const inputNameNorm = cleanName.toLowerCase().replace(/\s+/g, ' ');
+
+      const nameMatches =
+        dbNameNorm === inputNameNorm ||
+        dbNameNorm.includes(inputNameNorm) ||
+        inputNameNorm.includes(dbNameNorm);
+
+      if (!nameMatches) {
+        res.status(400).json({
+          error: `The provided name does not match campus records for USN ${cleanUsn}. Please enter your official registered name.`,
+        });
+        return;
+      }
+
+      const passwordHash = await bcrypt.hash(password, 10);
+
+      const claimedStudent = await prisma.student.update({
+        where: { id: existingStudent.id },
+        data: {
+          passwordHash,
+          phone: cleanPhone || existingStudent.phone,
+          ...(email ? { email: cleanEmail } : {}),
+        },
+        include: {
+          semester: true,
+          branch: true,
+          section: true,
+        },
+      });
+
+      await prisma.notificationPreference.upsert({
+        where: { studentId: claimedStudent.id },
+        create: { studentId: claimedStudent.id },
+        update: {},
+      });
+
+      const token = generateToken({
+        userId: claimedStudent.userId,
+        role: 'STUDENT',
+        studentId: claimedStudent.id,
+        usn: claimedStudent.usn,
+        semesterId: claimedStudent.semesterId,
+        branchId: claimedStudent.branchId,
+        sectionId: claimedStudent.sectionId,
+      });
+
+      res.cookie('token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      });
+
+      await logAuditAction({
+        actorEmail: claimedStudent.email || claimedStudent.usn,
+        actorRole: 'STUDENT',
+        action: 'STUDENT_ACCOUNT_CLAIMED',
+        details: { usn: claimedStudent.usn, name: claimedStudent.name },
+        ipAddress: req.ip,
+      });
+
+      res.status(200).json({
+        token,
+        user: { id: claimedStudent.userId, role: 'STUDENT' },
+        student: {
+          id: claimedStudent.id,
+          usn: claimedStudent.usn,
+          name: claimedStudent.name,
+          email: claimedStudent.email,
+          semester: { id: claimedStudent.semester.id, number: claimedStudent.semester.number, name: claimedStudent.semester.name },
+          branch: { id: claimedStudent.branch.id, code: claimedStudent.branch.code, name: claimedStudent.branch.name },
+          section: { id: claimedStudent.section.id, name: claimedStudent.section.name },
+        },
+      });
       return;
     }
 
@@ -112,7 +205,7 @@ export async function registerStudent(req: Request, res: Response): Promise<void
     res.cookie('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: 'strict',
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
@@ -139,7 +232,131 @@ export async function registerStudent(req: Request, res: Response): Promise<void
     });
   } catch (error: any) {
     console.error('Student registration error:', error);
-    res.status(500).json({ error: 'Failed to register student account: ' + error.message });
+    res.status(500).json({ error: 'Failed to register student account. Please try again.' });
+  }
+}
+
+export async function activateStudent(req: Request, res: Response): Promise<void> {
+  try {
+    const { usn, name, email, password } = req.body;
+
+    if (!usn || !password) {
+      res.status(400).json({ error: 'USN and new password are required.' });
+      return;
+    }
+
+    if (String(password).length < 8) {
+      res.status(400).json({ error: 'Password must be at least 8 characters long for security.' });
+      return;
+    }
+
+    const cleanUsn = String(usn).trim().toUpperCase();
+
+    const student = await prisma.student.findUnique({
+      where: { usn: cleanUsn },
+      include: {
+        semester: true,
+        branch: true,
+        section: true,
+        user: true,
+      },
+    });
+
+    if (!student) {
+      res.status(400).json({ error: 'Verification failed. Student record not found.' });
+      return;
+    }
+
+    if (student.passwordHash) {
+      res.status(400).json({ error: 'Account has already been set up. Please sign in with your password.' });
+      return;
+    }
+
+    if (name) {
+      const dbNameNorm = student.name.trim().toLowerCase().replace(/\s+/g, ' ');
+      const inputNameNorm = String(name).trim().toLowerCase().replace(/\s+/g, ' ');
+      if (!dbNameNorm.includes(inputNameNorm) && !inputNameNorm.includes(dbNameNorm)) {
+        res.status(400).json({ error: 'The provided name does not match the registered academic record.' });
+        return;
+      }
+    } else if (email && student.email) {
+      const studentEmail = student.email.trim().toLowerCase();
+      if (studentEmail !== String(email).trim().toLowerCase()) {
+        res.status(400).json({ error: 'The provided email does not match the registered academic record.' });
+        return;
+      }
+    }
+
+    // Hash the student's chosen password
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    // Update student with the new password
+    const updatedStudent = await prisma.student.update({
+      where: { id: student.id },
+      data: {
+        passwordHash,
+        ...(email ? { email: String(email).trim().toLowerCase() } : {}),
+      },
+      include: {
+        semester: true,
+        branch: true,
+        section: true,
+      },
+    });
+
+    const token = generateToken({
+      userId: updatedStudent.userId,
+      role: 'STUDENT',
+      studentId: updatedStudent.id,
+      usn: updatedStudent.usn,
+      semesterId: updatedStudent.semesterId,
+      branchId: updatedStudent.branchId,
+      sectionId: updatedStudent.sectionId,
+    });
+
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    await logAuditAction({
+      actorEmail: updatedStudent.email || updatedStudent.usn,
+      actorRole: 'STUDENT',
+      action: 'STUDENT_ACTIVATED',
+      details: { usn: updatedStudent.usn },
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      token,
+      user: { id: updatedStudent.userId, role: 'STUDENT' },
+      student: {
+        id: updatedStudent.id,
+        usn: updatedStudent.usn,
+        name: updatedStudent.name,
+        email: updatedStudent.email,
+        semester: {
+          id: updatedStudent.semester.id,
+          number: updatedStudent.semester.number,
+          name: updatedStudent.semester.name,
+        },
+        branch: {
+          id: updatedStudent.branch.id,
+          code: updatedStudent.branch.code,
+          name: updatedStudent.branch.name,
+        },
+        section: {
+          id: updatedStudent.section.id,
+          name: updatedStudent.section.name,
+        },
+      },
+    });
+  } catch (error: any) {
+    console.error('activateStudent error:', error);
+    res.status(500).json({ error: 'Failed to activate student account. Please try again.' });
   }
 }
 
@@ -180,19 +397,32 @@ export async function studentLogin(req: Request, res: Response): Promise<void> {
     }
 
     if (!student) {
+      // SEC-6: Generic error message to prevent USN enumeration
       res.status(401).json({
-        error: `No account found for USN ${cleanUsn}. Please check your USN or register a new account.`,
+        error: 'Invalid credentials. Please check your USN and password.',
       });
       return;
     }
 
-    // Verify password if set on student account
-    if (student.passwordHash && password) {
-      const isValid = await bcrypt.compare(password, student.passwordHash);
-      if (!isValid) {
-        res.status(401).json({ error: 'Incorrect password. Please try again.' });
-        return;
-      }
+    // Zero-Trust Check: unactivated accounts without passwordHash must set password via registration
+    if (!student.passwordHash) {
+      res.status(403).json({
+        error: 'Your account is on the campus roster, but your password is not set yet. Please click Register to choose your password.',
+        code: 'SETUP_REQUIRED',
+        usn: student.usn,
+      });
+      return;
+    }
+
+    if (!password) {
+      res.status(401).json({ error: 'Invalid credentials. Please check your USN and password.' });
+      return;
+    }
+
+    const isValid = await bcrypt.compare(password, student.passwordHash);
+    if (!isValid) {
+      res.status(401).json({ error: 'Invalid credentials. Please check your USN and password.' });
+      return;
     }
 
     const token = generateToken({
@@ -208,7 +438,7 @@ export async function studentLogin(req: Request, res: Response): Promise<void> {
     res.cookie('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: 'strict',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
@@ -282,7 +512,7 @@ export async function adminLogin(req: Request, res: Response): Promise<void> {
     res.cookie('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: 'strict',
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
@@ -381,6 +611,10 @@ export async function getMe(req: Request, res: Response): Promise<void> {
 }
 
 export async function logout(req: Request, res: Response): Promise<void> {
-  res.clearCookie('token');
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+  });
   res.json({ success: true, message: 'Logged out successfully.' });
 }

@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import apiRouter from './routes/index.js';
 
@@ -21,27 +23,54 @@ const allowedOrigins = [
   process.env.CLIENT_URL,
 ].filter(Boolean) as string[];
 
-// Security and CORS configuration
+// Security headers (SEC-9: hardened CSP)
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+        imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+        connectSrc: ["'self'", 'http://localhost:*', 'ws://localhost:*', ...allowedOrigins],
+        workerSrc: ["'self'", 'blob:'],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  })
+);
+
+// CORS configuration (SEC-1: strict origin checking in production)
 app.use(
   cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (mobile apps, curl, server-to-server)
       if (!origin) return callback(null, true);
-      // Allow localhost, configured env URLs, or any *.vercel.app preview/production deployment
+      // In production, strictly match explicitly configured domains
       if (
         allowedOrigins.includes(origin) ||
-        origin.endsWith('.vercel.app') ||
         process.env.NODE_ENV !== 'production'
       ) {
         return callback(null, true);
       }
-      return callback(null, true); // Permissive during deployment to prevent blocked mobile clients
+      return callback(new Error(`CORS: Origin ${origin} not allowed`), false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   })
 );
+
+// General API rate limiting: 300 requests per 5 minutes per IP (DoS protection)
+const apiGeneralLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please slow down.' },
+});
+app.use('/api', apiGeneralLimiter);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));

@@ -74,13 +74,30 @@ export function parseTimetableBuffer(
   fileType: 'csv' | 'xlsx'
 ): TimetableParseResult {
   const workbook = xlsx.read(buffer, { type: 'buffer' });
+  if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+    throw new Error('Invalid spreadsheet: No sheets found in workbook.');
+  }
+
   const sheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[sheetName];
-  const jsonData: any[] = xlsx.utils.sheet_to_json(worksheet, { defval: '' });
+  if (!worksheet) {
+    throw new Error('Invalid spreadsheet: First sheet is empty or corrupted.');
+  }
+
+  // Parse rows with an upper bound of 500 rows to prevent DOS payload expansion
+  const rawJson: any[] = xlsx.utils.sheet_to_json(worksheet, { defval: '' });
+  const jsonData = rawJson.slice(0, 500);
 
   const validRows: ParsedTimetableRow[] = [];
   const errors: ValidationError[] = [];
   const warnings: ValidationWarning[] = [];
+
+  if (rawJson.length > 500) {
+    warnings.push({
+      rowNumber: 501,
+      message: `File contains ${rawJson.length} rows. Only the first 500 rows were parsed.`,
+    });
+  }
 
   jsonData.forEach((row, index) => {
     const rowNumber = index + 2; // header is row 1
@@ -178,20 +195,32 @@ export function parseTimetableBuffer(
     });
   });
 
-  // Check for internal conflicts/overlaps in the batch
-  for (let i = 0; i < validRows.length; i++) {
-    for (let j = i + 1; j < validRows.length; j++) {
-      const a = validRows[i];
-      const b = validRows[j];
-      if (a.dayOfWeek === b.dayOfWeek) {
-        // overlap condition: max(startA, startB) < min(endA, endB)
-        const overlap = (a.startTime < b.endTime) && (b.startTime < a.endTime);
-        if (overlap) {
-          warnings.push({
-            rowNumber: b.rowNumber,
-            message: `Time slot conflict on ${a.dayName} between row ${a.rowNumber} (${a.startTime}-${a.endTime}) and row ${b.rowNumber} (${b.startTime}-${b.endTime}).`,
-          });
+  // PERF-9: Check for internal conflicts/overlaps in O(n log n) by grouping by day and sorting by startTime
+  const rowsByDay = new Map<number, typeof validRows>();
+  for (const row of validRows) {
+    const list = rowsByDay.get(row.dayOfWeek);
+    if (!list) {
+      rowsByDay.set(row.dayOfWeek, [row]);
+    } else {
+      list.push(row);
+    }
+  }
+
+  for (const [, dayRows] of rowsByDay) {
+    const sorted = [...dayRows].sort((a, b) => a.startTime.localeCompare(b.startTime) || a.rowNumber - b.rowNumber);
+    for (let i = 0; i < sorted.length; i++) {
+      const a = sorted[i];
+      for (let j = i + 1; j < sorted.length; j++) {
+        const b = sorted[j];
+        if (b.startTime >= a.endTime) {
+          break;
         }
+        const first = a.rowNumber < b.rowNumber ? a : b;
+        const second = a.rowNumber < b.rowNumber ? b : a;
+        warnings.push({
+          rowNumber: second.rowNumber,
+          message: `Time slot conflict on ${first.dayName} between row ${first.rowNumber} (${first.startTime}-${first.endTime}) and row ${second.rowNumber} (${second.startTime}-${second.endTime}).`,
+        });
       }
     }
   }

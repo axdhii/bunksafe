@@ -20,6 +20,7 @@ import {
 import { apiRequest } from '../../api/client';
 import { PageHeader } from '../../components/common/PageHeader';
 import { DayReplicatorModal } from '../../components/common/DayReplicatorModal';
+import { AiTimetableScanModal } from '../../components/common/AiTimetableScanModal';
 
 export interface DaySlot {
   id: string;
@@ -111,6 +112,7 @@ export const AdminTimetable: React.FC = () => {
 
   // Replicator Modal State
   const [replicatorOpen, setReplicatorOpen] = useState(false);
+  const [aiScanOpen, setAiScanOpen] = useState(false);
 
   // Status & Saving State
   const [saving, setSaving] = useState(false);
@@ -555,6 +557,15 @@ export const AdminTimetable: React.FC = () => {
                 <span>Weekly Grid</span>
               </button>
             </div>
+
+            {/* AI Scanner Button */}
+            <button
+              onClick={() => setAiScanOpen(true)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-gradient-to-r from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 text-emerald-300 hover:text-white hover:bg-emerald-500/30 active:scale-95 transition-all text-xs font-semibold shadow-sm cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+              <span>Scan with Gemini AI</span>
+            </button>
 
             {/* Save Button */}
             <button
@@ -1191,6 +1202,22 @@ export const AdminTimetable: React.FC = () => {
         sourceDayOfWeek={activeDay.dayOfWeek}
         availableDays={INITIAL_DAYS}
         onReplicate={handleReplicateDay}
+      />
+
+      {/* AI Timetable Scanner Modal */}
+      <AiTimetableScanModal
+        isOpen={aiScanOpen}
+        onClose={() => setAiScanOpen(false)}
+        semesterId={selectedSemId}
+        branchId={selectedBranchId}
+        sectionId={selectedSecId}
+        onSuccess={() => {
+          setStatusMessage({
+            type: 'success',
+            text: 'Timetable and subjects successfully extracted and saved with Gemini AI!',
+          });
+          fetchSectionTimetable();
+        }}
       />
     </div>
   );

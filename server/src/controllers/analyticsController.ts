@@ -110,35 +110,71 @@ export async function getStudentWeeklyAnalytics(req: Request, res: Response): Pr
 
 export async function getAdminAttendanceOverview(req: Request, res: Response): Promise<void> {
   try {
-    const students = await prisma.student.findMany({
-      include: {
-        semester: true,
-        branch: true,
-        section: true,
-        attendances: true,
-      },
+    // PERF-1: Aggregate attendance counts at DB level instead of loading all records
+    const [thresholdSetting, totalStudentsCount, attendanceAggregates] = await Promise.all([
+      prisma.systemSetting.findUnique({
+        where: { key: 'MINIMUM_ATTENDANCE_THRESHOLD' },
+      }),
+      prisma.student.count(),
+      // Group attendance counts by student at the DB level
+      prisma.attendance.groupBy({
+        by: ['studentId'],
+        _count: {
+          id: true,
+        },
+        where: {
+          status: { in: ['PRESENT', 'ABSENT'] },
+        },
+      }),
+    ]);
+
+    const defaultThreshold = thresholdSetting ? parseFloat(thresholdSetting.value) : 85.0;
+
+    // Get present counts per student
+    const presentCounts = await prisma.attendance.groupBy({
+      by: ['studentId'],
+      _count: { id: true },
+      where: { status: 'PRESENT' },
     });
 
-    const thresholdSetting = await prisma.systemSetting.findUnique({
-      where: { key: 'MINIMUM_ATTENDANCE_THRESHOLD' },
-    });
-    const defaultThreshold = thresholdSetting ? parseFloat(thresholdSetting.value) : 85.0;
+    const presentMap = new Map(presentCounts.map((p) => [p.studentId, p._count.id]));
 
     let safeCount = 0;
     let warningCount = 0;
     let criticalCount = 0;
-    const atRiskStudents: any[] = [];
+    const criticalStudentIds: string[] = [];
 
-    students.forEach((st) => {
-      let attended = 0;
-      let conducted = 0;
-      for (const a of st.attendances) {
-        if (a.status === 'PRESENT') { attended++; conducted++; }
-        else if (a.status === 'ABSENT') { conducted++; }
-      }
+    for (const agg of attendanceAggregates) {
+      const conducted = agg._count.id;
+      const attended = presentMap.get(agg.studentId) || 0;
       const metrics = calculateAttendance(attended, conducted, defaultThreshold);
+
       if (metrics.risk === 'CRITICAL') {
         criticalCount++;
+        criticalStudentIds.push(agg.studentId);
+      } else if (metrics.risk === 'WARNING') {
+        warningCount++;
+      } else {
+        safeCount++;
+      }
+    }
+
+    // Students with no attendance records at all are SAFE
+    const studentsWithRecords = attendanceAggregates.length;
+    safeCount += (totalStudentsCount - studentsWithRecords);
+
+    // Only fetch full details for at-risk students (max 20)
+    const atRiskStudents: any[] = [];
+    if (criticalStudentIds.length > 0) {
+      const criticalStudents = await prisma.student.findMany({
+        where: { id: { in: criticalStudentIds.slice(0, 20) } },
+        include: { semester: true, branch: true, section: true },
+      });
+
+      for (const st of criticalStudents) {
+        const conducted = attendanceAggregates.find((a) => a.studentId === st.id)?._count.id || 0;
+        const attended = presentMap.get(st.id) || 0;
+        const metrics = calculateAttendance(attended, conducted, defaultThreshold);
         atRiskStudents.push({
           id: st.id,
           usn: st.usn,
@@ -149,22 +185,18 @@ export async function getAdminAttendanceOverview(req: Request, res: Response): P
           percentage: metrics.percentage,
           recoveryRequired: metrics.recoveryRequired,
         });
-      } else if (metrics.risk === 'WARNING') {
-        warningCount++;
-      } else {
-        safeCount++;
       }
-    });
+    }
 
     res.json({
-      totalStudents: students.length,
+      totalStudents: totalStudentsCount,
       threshold: defaultThreshold,
       distribution: {
         safe: safeCount,
         warning: warningCount,
         critical: criticalCount,
       },
-      atRiskStudents: atRiskStudents.slice(0, 20),
+      atRiskStudents,
     });
   } catch (error: any) {
     console.error('getAdminAttendanceOverview error:', error);

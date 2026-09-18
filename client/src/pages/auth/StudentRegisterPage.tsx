@@ -99,6 +99,12 @@ export const StudentRegisterPage: React.FC = () => {
       }
     };
     fetchOptions();
+
+    const params = new URLSearchParams(window.location.search);
+    const prefillUsn = params.get('usn');
+    if (prefillUsn) {
+      setUsn(prefillUsn.trim().toUpperCase());
+    }
   }, []);
 
   const availableSections = sections.filter(
@@ -150,8 +156,8 @@ export const StudentRegisterPage: React.FC = () => {
       return;
     }
 
-    if (password.length < 6) {
-      setErrorMessage('Password must be at least 6 characters.');
+    if (password.length < 8) {
+      setErrorMessage('Password must be at least 8 characters for security.');
       return;
     }
 
@@ -161,7 +167,7 @@ export const StudentRegisterPage: React.FC = () => {
     const selectedSec = displayedSections.find((s) => s.id === sectionId) || sections.find((s) => s.id === sectionId);
 
     try {
-      const res = await apiRequest<{ token: string; user: any; student: any }>('/auth/student/register', {
+      const res = await apiRequest<{ token?: string; user: any; student: any }>('/auth/student/register', {
         method: 'POST',
         data: {
           name,
@@ -175,7 +181,7 @@ export const StudentRegisterPage: React.FC = () => {
         },
       });
 
-      setAuthUser(res.token, res.user, res.student);
+      setAuthUser(res.token || '', res.user, res.student);
 
       setRegisteredStudent({
         usn: res.student.usn,
@@ -186,33 +192,7 @@ export const StudentRegisterPage: React.FC = () => {
         sectionName: selectedSec?.name || 'A',
       });
     } catch (err: any) {
-      // If network/backend error occurs locally, gracefully onboard so user flow is seamless
-      const mockStudent = {
-        id: 'student-' + Date.now(),
-        usn: usn.trim().toUpperCase(),
-        name: name.trim(),
-        phone: phone.trim(),
-        batch,
-        semesterNumber: selectedSem?.number || 5,
-        branchCode: selectedBranch?.code || 'CSE',
-        sectionName: selectedSec?.name || 'A',
-      };
-      const mockUser = {
-        id: 'user-' + Date.now(),
-        role: 'STUDENT',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      const mockToken = 'bunk_token_' + Date.now();
-      setAuthUser(mockToken, mockUser as any, mockStudent as any);
-      setRegisteredStudent({
-        usn: mockStudent.usn,
-        name: mockStudent.name,
-        phone: mockStudent.phone,
-        branchCode: mockStudent.branchCode,
-        semesterNumber: mockStudent.semesterNumber,
-        sectionName: mockStudent.sectionName,
-      });
+      setErrorMessage(err.message || 'Registration failed. Please check your details.');
     } finally {
       setSubmitting(false);
     }

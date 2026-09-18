@@ -165,14 +165,38 @@ export async function broadcastAnnouncement(req: Request, res: Response): Promis
 
     const students = await prisma.student.findMany({ where, select: { id: true } });
 
-    for (const s of students) {
-      await sendSmartNotification({
-        studentId: s.id,
-        title,
-        message,
-        category: 'SYSTEM',
-        isUrgent: true,
+    // PERF-3: Batch-insert all notification records in one query instead of N sequential calls
+    if (students.length > 0) {
+      await prisma.notification.createMany({
+        data: students.map((s) => ({
+          studentId: s.id,
+          title,
+          message,
+          category: 'SYSTEM',
+          isRead: false,
+        })),
       });
+
+      // Fan out push notifications asynchronously (fire-and-forget, don't block response)
+      // Process in chunks of 50 to avoid overwhelming the push service
+      const CHUNK_SIZE = 50;
+      const sendPushes = async () => {
+        for (let i = 0; i < students.length; i += CHUNK_SIZE) {
+          const chunk = students.slice(i, i + CHUNK_SIZE);
+          await Promise.allSettled(
+            chunk.map((s) =>
+              sendSmartNotification({
+                studentId: s.id,
+                title,
+                message,
+                category: 'SYSTEM',
+                isUrgent: true,
+              }).catch(() => {}) // Swallow individual push failures
+            )
+          );
+        }
+      };
+      sendPushes().catch(console.error); // Fire and forget
     }
 
     await logAuditAction({

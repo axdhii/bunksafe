@@ -25,11 +25,11 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
 
-// Public / Authenticated read routes for dropdowns & student lookup
-router.get('/semesters', getSemesters);
-router.get('/branches', getBranches);
-router.get('/sections', getSections);
-router.get('/subjects', getSubjects);
+// Authenticated read routes for dropdowns & student lookup (SEC-11: no longer public)
+router.get('/semesters', requireAuth, getSemesters);
+router.get('/branches', requireAuth, getBranches);
+router.get('/sections', requireAuth, getSections);
+router.get('/subjects', requireAuth, getSubjects);
 
 // Admin-only management
 router.post('/semesters', requireAuth, requireAdmin, createSemester);

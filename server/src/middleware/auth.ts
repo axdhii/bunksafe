@@ -1,7 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
-const AUTH_SECRET = process.env.AUTH_SECRET || 'fallback_secret_for_dev_mode_only_12345';
+// SEC-3: No hardcoded fallback — crash in production if AUTH_SECRET is missing
+if (!process.env.AUTH_SECRET && process.env.NODE_ENV === 'production') {
+  throw new Error('FATAL: AUTH_SECRET environment variable is required in production.');
+}
+const AUTH_SECRET = process.env.AUTH_SECRET || 'dev_only_secret_not_for_production_use_32chars';
 
 export interface AuthPayload {
   userId: string;

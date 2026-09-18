@@ -31,6 +31,7 @@ export const StudentLoginPage: React.FC = () => {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [setupRequired, setSetupRequired] = useState(false);
 
   // Load remembered USN on mount
   useEffect(() => {
@@ -44,6 +45,7 @@ export const StudentLoginPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSetupRequired(false);
     setLoading(true);
 
     try {
@@ -56,7 +58,12 @@ export const StudentLoginPage: React.FC = () => {
       await loginStudent(usn, semesterNumber, branchCode, sectionName, password);
       navigate('/');
     } catch (err: any) {
-      setError(err.message || 'Login failed. Please verify your USN and credentials.');
+      if (err.code === 'SETUP_REQUIRED' || err.code === 'ACTIVATION_REQUIRED') {
+        setSetupRequired(true);
+        setError(err.message || 'Your account is on the campus roster, but your password is not set yet. Please click below to choose your password.');
+      } else {
+        setError(err.message || 'Login failed. Please verify your USN and credentials.');
+      }
     } finally {
       setLoading(false);
     }
@@ -84,7 +91,7 @@ export const StudentLoginPage: React.FC = () => {
       {/* TOP ZONE: BRAND + STARFIELD + ARCS                                 */}
       {/* ================================================================== */}
       <div className="w-full flex flex-col relative z-10">
-        {/* Brand Header — shifted slightly further down on mobile, unchanged on desktop */}
+        {/* Brand Header */}
         <div className="flex flex-col items-center justify-center text-center px-4 pt-14 sm:pt-16 md:pt-20 lg:pt-24 pb-6 sm:pb-10 md:pb-12 space-y-2 sm:space-y-4">
           <div className="flex items-center justify-center gap-3">
             <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-white/[0.08] border border-white/15 flex items-center justify-center text-white font-black text-xl sm:text-2xl shadow-lg">
@@ -104,7 +111,7 @@ export const StudentLoginPage: React.FC = () => {
         {/* CONCENTRIC ARCS — 3 Equal-Thickness Graduated Bands              */}
         {/* ================================================================ */}
         <div className="w-full relative h-36 sm:h-56 md:h-64 overflow-hidden -mb-px pointer-events-none shrink-0">
-          {/* MOBILE ARCS (< 640px): 3 equal ~40px bands, gentle upward planetary dome */}
+          {/* MOBILE ARCS (< 640px) */}
           <svg
             viewBox="0 0 400 150"
             className="w-full h-full block sm:hidden"
@@ -112,24 +119,21 @@ export const StudentLoginPage: React.FC = () => {
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
           >
-            {/* Outer Band: subtle atmosphere */}
             <path
               d="M 0,30 A 800 800 0 0 1 400,30 L 400,150 L 0,150 Z"
               fill="rgba(255, 255, 255, 0.08)"
             />
-            {/* Middle Band: visible silver */}
             <path
               d="M 0,70 A 800 800 0 0 1 400,70 L 400,150 L 0,150 Z"
               fill="rgba(255, 255, 255, 0.18)"
             />
-            {/* Base Band: planetary surface transition */}
             <path
               d="M 0,110 A 800 800 0 0 1 400,110 L 400,150 L 0,150 Z"
               fill="#22232a"
             />
           </svg>
 
-          {/* DESKTOP ARCS (>= 640px): 3 equal ~75px bands, R=4000 upward planetary dome, apex safe at y=15 (no chopping) */}
+          {/* DESKTOP ARCS (>= 640px) */}
           <svg
             viewBox="0 0 1440 320"
             className="w-full h-full hidden sm:block"
@@ -137,17 +141,14 @@ export const StudentLoginPage: React.FC = () => {
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
           >
-            {/* Outer Band: subtle atmosphere */}
             <path
               d="M 0,80 A 4000 4000 0 0 1 1440,80 L 1440,320 L 0,320 Z"
               fill="rgba(255, 255, 255, 0.08)"
             />
-            {/* Middle Band: visible silver */}
             <path
               d="M 0,155 A 4000 4000 0 0 1 1440,155 L 1440,320 L 0,320 Z"
               fill="rgba(255, 255, 255, 0.18)"
             />
-            {/* Base Band: planetary surface transition */}
             <path
               d="M 0,230 A 4000 4000 0 0 1 1440,230 L 1440,320 L 0,320 Z"
               fill="#22232a"
@@ -160,7 +161,6 @@ export const StudentLoginPage: React.FC = () => {
       {/* NATIVE GREYISH BASE SURFACE: DIRECT LOGIN FORM (NO CARD STRUCTURE)  */}
       {/* ================================================================== */}
       <div className="w-full flex-1 bg-[#22232a] relative z-10 px-5 sm:px-6 pt-10 sm:pt-8 pb-10 sm:pb-16 flex flex-col items-center justify-between pb-safe">
-        {/* Direct Form Area (No Card Box) */}
         <div className="w-full max-w-md mx-auto space-y-4">
           <div className="pb-2 border-b border-white/[0.08]">
             <h2 className="text-xl sm:text-2xl font-bold text-white font-sans tracking-tight">Student Sign In</h2>
@@ -168,9 +168,19 @@ export const StudentLoginPage: React.FC = () => {
           </div>
 
           {error && (
-            <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300 flex items-start gap-2.5 font-sub animate-fade-in">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
-              <span>{error}</span>
+            <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300 space-y-2.5 font-sub animate-fade-in">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+                <span>{error}</span>
+              </div>
+              {setupRequired && (
+                <Link
+                  to={`/register?usn=${encodeURIComponent(usn.trim().toUpperCase())}`}
+                  className="w-full py-2.5 px-4 rounded-xl bg-white text-black font-sans font-bold text-xs flex items-center justify-center gap-1.5 hover:bg-zinc-200 active:scale-[0.98] transition-all shadow-md"
+                >
+                  <span>Complete Account Setup & Set Password →</span>
+                </Link>
+              )}
             </div>
           )}
 
@@ -296,13 +306,13 @@ export const StudentLoginPage: React.FC = () => {
           </form>
 
           {/* Links */}
-          <div className="pt-3 border-t border-white/[0.08] text-center space-y-2">
+          <div className="pt-3 border-t border-white/[0.08] text-center space-y-2.5">
             <Link
               to="/register"
-              className="text-xs font-semibold text-zinc-300 hover:text-white flex items-center justify-center gap-1.5 transition-colors font-sans"
+              className="text-xs font-semibold text-zinc-300 hover:text-white flex items-center justify-center gap-1.5 transition-colors font-sans py-1"
             >
               <UserPlus className="w-4 h-4" />
-              <span>New Student? Register Account Now →</span>
+              <span>New Student or Roster Setup? Register / Set Password →</span>
             </Link>
 
             <div>

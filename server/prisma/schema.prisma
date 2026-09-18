@@ -67,6 +67,7 @@ model Section {
   timetables Timetable[]
 
   @@unique([name, semesterId, branchId])
+  @@index([semesterId, branchId])
 }
 
 model Subject {
@@ -83,6 +84,7 @@ model Subject {
   attendances      Attendance[]
 
   @@unique([code, semesterId, branchId])
+  @@index([semesterId, branchId])
 }
 
 model Timetable {
@@ -100,6 +102,8 @@ model Timetable {
   entries        TimetableEntry[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
+
+  @@index([sectionId, semesterId, branchId, isActive])
 }
 
 model TimetableEntry {
@@ -144,7 +148,6 @@ model Student {
   pushSubscriptions      PushSubscription[]
   notifications          Notification[]
 
-  @@index([usn])
   @@index([semesterId, branchId, sectionId])
 }
 
@@ -166,6 +169,8 @@ model Attendance {
   @@unique([studentId, subjectId, date, timetableEntryId])
   @@index([studentId, date])
   @@index([studentId, subjectId])
+  @@index([studentId, status])
+  @@index([status])
 }
 
 model NotificationPreference {
@@ -210,6 +215,7 @@ model Notification {
 
   @@index([studentId, isRead])
   @@index([studentId, deduplicationKey])
+  @@index([studentId, createdAt])
 }
 
 model AuditLog {

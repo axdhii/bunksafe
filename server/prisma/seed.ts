@@ -210,7 +210,9 @@ async function main() {
 
   console.log(`✅ Created timetable with ${createdEntries.length} weekly classes`);
 
-  // 10. Students
+  // 10. Students (Demo credentials: password is "Demo@12345")
+  const demoStudentPasswordHash = await bcrypt.hash('Demo@12345', 10);
+
   // Student 1: Aarav Sharma (Primary demo student)
   const user1 = await prisma.user.create({ data: { role: 'STUDENT' } });
   const student1 = await prisma.student.create({
@@ -219,6 +221,7 @@ async function main() {
       usn: '1MS21CS001',
       name: 'Aarav Sharma',
       email: 'aarav.sharma@college.edu',
+      passwordHash: demoStudentPasswordHash,
       semesterId: sem5.id,
       branchId: cse.id,
       sectionId: secA.id,
@@ -237,6 +240,7 @@ async function main() {
       usn: '1MS21CS002',
       name: 'Ananya Rao',
       email: 'ananya.rao@college.edu',
+      passwordHash: demoStudentPasswordHash,
       semesterId: sem5.id,
       branchId: cse.id,
       sectionId: secA.id,
@@ -252,6 +256,7 @@ async function main() {
       usn: '1MS21CS045',
       name: 'Rohan Verma',
       email: 'rohan.verma@college.edu',
+      passwordHash: demoStudentPasswordHash,
       semesterId: sem5.id,
       branchId: cse.id,
       sectionId: secB.id,
@@ -259,7 +264,7 @@ async function main() {
   });
   await prisma.notificationPreference.create({ data: { studentId: student3.id } });
 
-  console.log(`✅ Seeded demo students: 1MS21CS001, 1MS21CS002, 1MS21CS045`);
+  console.log(`✅ Seeded demo students: 1MS21CS001, 1MS21CS002, 1MS21CS045 (Password: Demo@12345)`);
 
   // 11. Attendance Records for Student 1 (Aarav Sharma)
   // Let's generate realistic historical records over the past 4 weeks (20 working days)

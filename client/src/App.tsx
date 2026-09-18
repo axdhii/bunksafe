@@ -8,28 +8,36 @@ import { FloatingDock } from './components/common/FloatingDock';
 import { InstallPromptModal } from './components/common/InstallPromptModal';
 import { OfflineBanner } from './components/common/OfflineBanner';
 
-// Auth Pages
-import { StudentLoginPage } from './pages/auth/StudentLoginPage';
-import { StudentRegisterPage } from './pages/auth/StudentRegisterPage';
-import { AdminLoginPage } from './pages/auth/AdminLoginPage';
+// Loading Spinner for Route Chunk Suspense
+const PageLoader: React.FC = () => (
+  <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-3">
+    <div className="w-7 h-7 rounded-full border-2 border-white/20 border-t-white animate-spin" />
+    <span className="text-[11px] font-mono tracking-widest text-zinc-400 uppercase">Loading BunkSafe...</span>
+  </div>
+);
 
-// Student Pages
-import { StudentDashboard } from './pages/student/StudentDashboard';
-import { StudentTimetable } from './pages/student/StudentTimetable';
-import { StudentSubjects } from './pages/student/StudentSubjects';
-import { StudentHistory } from './pages/student/StudentHistory';
-import { StudentAnalytics } from './pages/student/StudentAnalytics';
-import { StudentNotifications } from './pages/student/StudentNotifications';
-import { StudentSettings } from './pages/student/StudentSettings';
+// Auth Pages (Lazy-Loaded)
+const StudentLoginPage = React.lazy(() => import('./pages/auth/StudentLoginPage').then((m) => ({ default: m.StudentLoginPage })));
+const StudentRegisterPage = React.lazy(() => import('./pages/auth/StudentRegisterPage').then((m) => ({ default: m.StudentRegisterPage })));
+const AdminLoginPage = React.lazy(() => import('./pages/auth/AdminLoginPage').then((m) => ({ default: m.AdminLoginPage })));
 
-// Admin Pages
-import { AdminDashboard } from './pages/admin/AdminDashboard';
-import { AdminAcademicStructure } from './pages/admin/AdminAcademicStructure';
-import { AdminStudents } from './pages/admin/AdminStudents';
-import { AdminSubjects } from './pages/admin/AdminSubjects';
-import { AdminTimetable } from './pages/admin/AdminTimetable';
-import { AdminNotifications } from './pages/admin/AdminNotifications';
-import { AdminSettings } from './pages/admin/AdminSettings';
+// Student Pages (Lazy-Loaded)
+const StudentDashboard = React.lazy(() => import('./pages/student/StudentDashboard').then((m) => ({ default: m.StudentDashboard })));
+const StudentTimetable = React.lazy(() => import('./pages/student/StudentTimetable').then((m) => ({ default: m.StudentTimetable })));
+const StudentSubjects = React.lazy(() => import('./pages/student/StudentSubjects').then((m) => ({ default: m.StudentSubjects })));
+const StudentHistory = React.lazy(() => import('./pages/student/StudentHistory').then((m) => ({ default: m.StudentHistory })));
+const StudentAnalytics = React.lazy(() => import('./pages/student/StudentAnalytics').then((m) => ({ default: m.StudentAnalytics })));
+const StudentNotifications = React.lazy(() => import('./pages/student/StudentNotifications').then((m) => ({ default: m.StudentNotifications })));
+const StudentSettings = React.lazy(() => import('./pages/student/StudentSettings').then((m) => ({ default: m.StudentSettings })));
+
+// Admin Pages (Lazy-Loaded: Separated from student bundle)
+const AdminDashboard = React.lazy(() => import('./pages/admin/AdminDashboard').then((m) => ({ default: m.AdminDashboard })));
+const AdminAcademicStructure = React.lazy(() => import('./pages/admin/AdminAcademicStructure').then((m) => ({ default: m.AdminAcademicStructure })));
+const AdminStudents = React.lazy(() => import('./pages/admin/AdminStudents').then((m) => ({ default: m.AdminStudents })));
+const AdminSubjects = React.lazy(() => import('./pages/admin/AdminSubjects').then((m) => ({ default: m.AdminSubjects })));
+const AdminTimetable = React.lazy(() => import('./pages/admin/AdminTimetable').then((m) => ({ default: m.AdminTimetable })));
+const AdminNotifications = React.lazy(() => import('./pages/admin/AdminNotifications').then((m) => ({ default: m.AdminNotifications })));
+const AdminSettings = React.lazy(() => import('./pages/admin/AdminSettings').then((m) => ({ default: m.AdminSettings })));
 
 const StudentLayout: React.FC = () => {
   const { user, student, isLoading } = useAuth();
@@ -44,7 +52,9 @@ const StudentLayout: React.FC = () => {
       <OfflineBanner />
       <Navbar />
       <main className="flex-1 pb-20 md:pb-24">
-        <Outlet />
+        <React.Suspense fallback={<PageLoader />}>
+          <Outlet />
+        </React.Suspense>
       </main>
       <FloatingDock />
       <InstallPromptModal />
@@ -64,7 +74,9 @@ const AdminLayout: React.FC = () => {
     <div className="min-h-screen flex flex-col bg-black text-zinc-100 transition-colors">
       <Navbar />
       <main className="flex-1">
-        <Outlet />
+        <React.Suspense fallback={<PageLoader />}>
+          <Outlet />
+        </React.Suspense>
       </main>
     </div>
   );
@@ -77,9 +89,30 @@ export const App: React.FC = () => {
         <BrowserRouter>
           <Routes>
             {/* Public Auth Routes */}
-            <Route path="/login" element={<StudentLoginPage />} />
-            <Route path="/register" element={<StudentRegisterPage />} />
-            <Route path="/admin/login" element={<AdminLoginPage />} />
+            <Route
+              path="/login"
+              element={
+                <React.Suspense fallback={<PageLoader />}>
+                  <StudentLoginPage />
+                </React.Suspense>
+              }
+            />
+            <Route
+              path="/register"
+              element={
+                <React.Suspense fallback={<PageLoader />}>
+                  <StudentRegisterPage />
+                </React.Suspense>
+              }
+            />
+            <Route
+              path="/admin/login"
+              element={
+                <React.Suspense fallback={<PageLoader />}>
+                  <AdminLoginPage />
+                </React.Suspense>
+              }
+            />
 
             {/* Student Protected Routes */}
             <Route path="/" element={<StudentLayout />}>

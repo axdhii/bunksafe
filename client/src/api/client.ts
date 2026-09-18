@@ -13,13 +13,14 @@ interface RequestOptions extends RequestInit {
 }
 
 export async function apiRequest<T = any>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-  const token = localStorage.getItem('aurora_token');
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string> || {}),
   };
 
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  // Inject Bearer token if stored (provides fallback for Capacitor / cross-origin PWA environments)
+  const storedToken = localStorage.getItem('aurora_token');
+  if (storedToken && !headers['Authorization']) {
+    headers['Authorization'] = `Bearer ${storedToken}`;
   }
 
   let body = options.body;
@@ -38,15 +39,18 @@ export async function apiRequest<T = any>(endpoint: string, options: RequestOpti
 
   try {
     const response = await fetch(url, {
+      credentials: 'include',
       ...options,
       headers,
       body,
     });
 
     if (response.status === 401) {
-      // Clear token on 401 Unauthorized
+      // Clear session cache on 401 Unauthorized
       localStorage.removeItem('aurora_token');
       localStorage.removeItem('aurora_user');
+      localStorage.removeItem('aurora_student');
+      localStorage.removeItem('aurora_admin');
       if (!window.location.pathname.includes('/login')) {
         window.location.href = '/login';
       }
@@ -63,7 +67,10 @@ export async function apiRequest<T = any>(endpoint: string, options: RequestOpti
 
     if (!response.ok) {
       const errorMessage = data?.error || `Request failed with status ${response.status}`;
-      throw new Error(errorMessage);
+      const errorObj = new Error(errorMessage) as any;
+      if (data?.code) errorObj.code = data.code;
+      if (data?.usn) errorObj.usn = data.usn;
+      throw errorObj;
     }
 
     return data as T;

@@ -66,24 +66,29 @@ export const SparklesCore: React.FC<SparklesCoreProps> = ({
       });
     }
 
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let isRunning = !prefersReducedMotion;
+
     const render = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       particles.forEach((p) => {
-        p.y -= p.speedY;
-        p.x += p.speedX;
-        p.opacity += p.fadeSpeed;
+        if (!prefersReducedMotion) {
+          p.y -= p.speedY;
+          p.x += p.speedX;
+          p.opacity += p.fadeSpeed;
 
-        if (p.opacity > 1 || p.opacity < 0.15) {
-          p.fadeSpeed = -p.fadeSpeed;
-        }
+          if (p.opacity > 1 || p.opacity < 0.15) {
+            p.fadeSpeed = -p.fadeSpeed;
+          }
 
-        if (p.y < 0) {
-          p.y = canvas.height;
-          p.x = Math.random() * canvas.width;
+          if (p.y < 0) {
+            p.y = canvas.height;
+            p.x = Math.random() * canvas.width;
+          }
+          if (p.x < 0) p.x = canvas.width;
+          if (p.x > canvas.width) p.x = 0;
         }
-        if (p.x < 0) p.x = canvas.width;
-        if (p.x > canvas.width) p.x = 0;
 
         ctx.fillStyle = particleColor;
         ctx.globalAlpha = Math.max(0, Math.min(1, p.opacity));
@@ -92,13 +97,29 @@ export const SparklesCore: React.FC<SparklesCoreProps> = ({
         ctx.fill();
       });
 
-      animationFrameId = requestAnimationFrame(render);
+      if (isRunning) {
+        animationFrameId = requestAnimationFrame(render);
+      }
     };
 
+    // Draw initial state (or continuous loop if motion permitted)
     render();
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        isRunning = false;
+        cancelAnimationFrame(animationFrameId);
+      } else if (!prefersReducedMotion) {
+        isRunning = true;
+        animationFrameId = requestAnimationFrame(render);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       window.removeEventListener('resize', resize);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       cancelAnimationFrame(animationFrameId);
     };
   }, [maxSize, minSize, particleColor, particleDensity, speed]);
