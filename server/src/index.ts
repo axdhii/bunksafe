@@ -19,9 +19,24 @@ const allowedOrigins = [
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://localhost:3000',
+  'http://localhost',
+  'https://localhost',
+  'capacitor://localhost',
+  'https://bunk-safe.vercel.app',
+  'https://bunksafe-app.vercel.app',
+  'https://bunksafe-nine.vercel.app',
+  'https://bunksafe.vercel.app',
   process.env.FRONTEND_URL,
   process.env.CLIENT_URL,
 ].filter(Boolean) as string[];
+
+const isOriginAllowed = (origin: string): boolean => {
+  if (allowedOrigins.includes(origin)) return true;
+  // Allow all Vercel deployment preview and production domains for this project
+  if (/^https:\/\/bunk.*\.vercel\.app$/.test(origin)) return true;
+  if (/^https:\/\/.*bunksafe.*\.vercel\.app$/.test(origin)) return true;
+  return false;
+};
 
 // Security headers (SEC-9: hardened CSP)
 app.use(
@@ -33,7 +48,7 @@ app.use(
         styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
         fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
         imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-        connectSrc: ["'self'", 'http://localhost:*', 'ws://localhost:*', ...allowedOrigins],
+        connectSrc: ["'self'", 'http://localhost:*', 'ws://localhost:*', 'https://*.vercel.app', ...allowedOrigins],
         workerSrc: ["'self'", 'blob:'],
       },
     },
@@ -47,9 +62,9 @@ app.use(
     origin: (origin, callback) => {
       // Allow requests with no origin (mobile apps, curl, server-to-server)
       if (!origin) return callback(null, true);
-      // In production, strictly match explicitly configured domains
+      // In production, match explicitly configured domains or verified project hosts
       if (
-        allowedOrigins.includes(origin) ||
+        isOriginAllowed(origin) ||
         process.env.NODE_ENV !== 'production'
       ) {
         return callback(null, true);
