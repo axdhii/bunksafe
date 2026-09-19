@@ -158,7 +158,7 @@ model Attendance {
   subjectId        String
   subject          Subject         @relation(fields: [subjectId], references: [id])
   timetableEntryId String?
-  timetableEntry   TimetableEntry? @relation(fields: [timetableEntryId], references: [id])
+  timetableEntry   TimetableEntry? @relation(fields: [timetableEntryId], references: [id], onDelete: SetNull)
   date             String          // "YYYY-MM-DD"
   status           String          // "PRESENT" | "ABSENT" | "CANCELLED" | "RESCHEDULED" | "HOLIDAY"
   remarks          String?

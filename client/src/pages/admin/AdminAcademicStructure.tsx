@@ -26,6 +26,13 @@ export const AdminAcademicStructure: React.FC = () => {
 
   const [deleteTarget, setDeleteTarget] = useState<{ type: string; id: string; name: string } | null>(null);
 
+  // Loading & Anti-spam state
+  const [submittingSem, setSubmittingSem] = useState(false);
+  const [submittingBranch, setSubmittingBranch] = useState(false);
+  const [submittingSec, setSubmittingSec] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
   const loadAll = async () => {
     try {
       const [sRes, bRes, secRes] = await Promise.all([
@@ -51,20 +58,27 @@ export const AdminAcademicStructure: React.FC = () => {
 
   const handleCreateSemester = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
+    setSubmittingSem(true);
     try {
       await apiRequest('/academic/semesters', {
         method: 'POST',
         data: { number: newSemNum, name: newSemName || `Semester ${newSemNum}` },
       });
       setShowAddSem(false);
+      setNewSemName('');
       loadAll();
     } catch (err: any) {
-      alert(err.message || 'Failed to create semester.');
+      setErrorMessage(err.message || 'Failed to create semester.');
+    } finally {
+      setSubmittingSem(false);
     }
   };
 
   const handleCreateBranch = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
+    setSubmittingBranch(true);
     try {
       await apiRequest('/academic/branches', {
         method: 'POST',
@@ -75,12 +89,16 @@ export const AdminAcademicStructure: React.FC = () => {
       setNewBranchName('');
       loadAll();
     } catch (err: any) {
-      alert(err.message || 'Failed to create branch.');
+      setErrorMessage(err.message || 'Failed to create branch.');
+    } finally {
+      setSubmittingBranch(false);
     }
   };
 
   const handleCreateSection = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
+    setSubmittingSec(true);
     try {
       await apiRequest('/academic/sections', {
         method: 'POST',
@@ -89,12 +107,16 @@ export const AdminAcademicStructure: React.FC = () => {
       setShowAddSection(false);
       loadAll();
     } catch (err: any) {
-      alert(err.message || 'Failed to create section.');
+      setErrorMessage(err.message || 'Failed to create section.');
+    } finally {
+      setSubmittingSec(false);
     }
   };
 
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return;
+    setErrorMessage(null);
+    setDeleting(true);
     try {
       let endpoint = '';
       if (deleteTarget.type === 'semester') endpoint = `/academic/semesters/${deleteTarget.id}`;
@@ -105,7 +127,9 @@ export const AdminAcademicStructure: React.FC = () => {
       setDeleteTarget(null);
       loadAll();
     } catch (err: any) {
-      alert(err.message || 'Cannot delete item with linked records.');
+      setErrorMessage(err.message || 'Cannot delete item with linked records.');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -239,8 +263,14 @@ export const AdminAcademicStructure: React.FC = () => {
       </div>
 
       {/* Modal Add Semester */}
-      <Modal isOpen={showAddSem} onClose={() => setShowAddSem(false)} title="Add New Semester">
+      <Modal isOpen={showAddSem} onClose={() => { setShowAddSem(false); setErrorMessage(null); }} title="Add New Semester">
         <form onSubmit={handleCreateSemester} className="space-y-4">
+          {errorMessage && (
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300 flex items-start gap-2 font-sub">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
           <div>
             <label className="block text-xs font-semibold text-zinc-300 mb-1 font-sub">Semester Number (1-8)</label>
             <input
@@ -265,16 +295,30 @@ export const AdminAcademicStructure: React.FC = () => {
           </div>
           <button
             type="submit"
-            className="w-full py-2.5 rounded-xl bg-white text-black font-bold text-xs hover:bg-zinc-200 transition-all font-sans"
+            disabled={submittingSem}
+            className="w-full py-2.5 rounded-xl bg-white disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed text-black font-bold text-xs hover:bg-zinc-200 transition-all font-sans flex items-center justify-center gap-2"
           >
-            Create Semester
+            {submittingSem ? (
+              <>
+                <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                <span>Creating Semester...</span>
+              </>
+            ) : (
+              'Create Semester'
+            )}
           </button>
         </form>
       </Modal>
 
       {/* Modal Add Branch */}
-      <Modal isOpen={showAddBranch} onClose={() => setShowAddBranch(false)} title="Add New Branch / Dept">
+      <Modal isOpen={showAddBranch} onClose={() => { setShowAddBranch(false); setErrorMessage(null); }} title="Add New Branch / Dept">
         <form onSubmit={handleCreateBranch} className="space-y-4">
+          {errorMessage && (
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300 flex items-start gap-2 font-sub">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
           <div>
             <label className="block text-xs font-semibold text-zinc-300 mb-1 font-sub">Branch Code (e.g. CSE)</label>
             <input
@@ -298,16 +342,30 @@ export const AdminAcademicStructure: React.FC = () => {
           </div>
           <button
             type="submit"
-            className="w-full py-2.5 rounded-xl bg-white text-black font-bold text-xs hover:bg-zinc-200 transition-all font-sans"
+            disabled={submittingBranch}
+            className="w-full py-2.5 rounded-xl bg-white disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed text-black font-bold text-xs hover:bg-zinc-200 transition-all font-sans flex items-center justify-center gap-2"
           >
-            Create Branch
+            {submittingBranch ? (
+              <>
+                <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                <span>Creating Branch...</span>
+              </>
+            ) : (
+              'Create Branch'
+            )}
           </button>
         </form>
       </Modal>
 
       {/* Modal Add Section */}
-      <Modal isOpen={showAddSection} onClose={() => setShowAddSection(false)} title="Add New Section">
+      <Modal isOpen={showAddSection} onClose={() => { setShowAddSection(false); setErrorMessage(null); }} title="Add New Section">
         <form onSubmit={handleCreateSection} className="space-y-4">
+          {errorMessage && (
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300 flex items-start gap-2 font-sub">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
           <div>
             <label className="block text-xs font-semibold text-zinc-300 mb-1 font-sub">Section Name (e.g. A, B, C)</label>
             <input
@@ -348,34 +406,58 @@ export const AdminAcademicStructure: React.FC = () => {
           </div>
           <button
             type="submit"
-            className="w-full py-2.5 rounded-xl bg-white text-black font-bold text-xs hover:bg-zinc-200 transition-all font-sans"
+            disabled={submittingSec}
+            className="w-full py-2.5 rounded-xl bg-white disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed text-black font-bold text-xs hover:bg-zinc-200 transition-all font-sans flex items-center justify-center gap-2"
           >
-            Create Section
+            {submittingSec ? (
+              <>
+                <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                <span>Creating Section...</span>
+              </>
+            ) : (
+              'Create Section'
+            )}
           </button>
         </form>
       </Modal>
 
       {/* Delete Confirmation Safety Modal */}
-      <Modal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Confirm Deletion">
+      <Modal isOpen={!!deleteTarget} onClose={() => { setDeleteTarget(null); setErrorMessage(null); }} title="Confirm Deletion">
         <div className="space-y-4">
-          <div className="flex items-start gap-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300">
-            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>
-              Are you sure you want to remove <span className="font-bold text-white">{deleteTarget?.name}</span>? This action cannot be undone if it has linked student or timetable records.
-            </span>
-          </div>
+          {errorMessage ? (
+            <div className="p-3.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-xs text-rose-200 flex items-start gap-2.5 font-sub">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+              <span>{errorMessage}</span>
+            </div>
+          ) : (
+            <div className="flex items-start gap-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                Are you sure you want to remove <span className="font-bold text-white">{deleteTarget?.name}</span>? This action cannot be undone if it has linked student or timetable records.
+              </span>
+            </div>
+          )}
           <div className="flex items-center justify-end gap-2 pt-2">
             <button
-              onClick={() => setDeleteTarget(null)}
-              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-white/10"
+              onClick={() => { setDeleteTarget(null); setErrorMessage(null); }}
+              disabled={deleting}
+              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-white/10 disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               onClick={handleConfirmDelete}
-              className="px-4 py-2 rounded-xl bg-rose-500 text-white font-bold text-xs hover:bg-rose-600"
+              disabled={deleting}
+              className="px-4 py-2 rounded-xl bg-rose-500 disabled:bg-rose-900 disabled:cursor-not-allowed text-white font-bold text-xs hover:bg-rose-600 flex items-center gap-2"
             >
-              Yes, Delete
+              {deleting ? (
+                <>
+                  <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                  <span>Deleting...</span>
+                </>
+              ) : (
+                'Yes, Delete'
+              )}
             </button>
           </div>
         </div>

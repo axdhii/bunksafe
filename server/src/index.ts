@@ -32,9 +32,8 @@ const allowedOrigins = [
 
 const isOriginAllowed = (origin: string): boolean => {
   if (allowedOrigins.includes(origin)) return true;
-  // Allow all Vercel deployment preview and production domains for this project
-  if (/^https:\/\/bunk.*\.vercel\.app$/.test(origin)) return true;
-  if (/^https:\/\/.*bunksafe.*\.vercel\.app$/.test(origin)) return true;
+  // Allow official Vercel preview deployments for the bunksafe / bunk-safe project by axdhii
+  if (/^https:\/\/(bunk-safe|bunksafe)(-[a-z0-9-]+)?-axdhiis-projects\.vercel\.app$/i.test(origin)) return true;
   return false;
 };
 

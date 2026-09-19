@@ -11,6 +11,29 @@ const getAuthCookieOptions = () => ({
   maxAge: 7 * 24 * 60 * 60 * 1000,
 });
 
+export function isNameMatching(dbName: string, inputName: string): boolean {
+  const normDb = dbName.trim().toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ');
+  const normInput = inputName.trim().toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ');
+  if (!normDb || !normInput) return false;
+  if (normDb === normInput) return true;
+
+  const dbTokens = normDb.split(' ').filter(t => t.length > 1);
+  const inputTokens = normInput.split(' ').filter(t => t.length > 1);
+
+  if (inputTokens.length === 0) {
+    return normDb === normInput;
+  }
+
+  // At least one substantial word (>= 3 chars) matches or all non-trivial tokens match
+  const substantialTokens = inputTokens.filter(t => t.length >= 3);
+  if (substantialTokens.length > 0) {
+    const hasSubstantialMatch = substantialTokens.some(tok => dbTokens.includes(tok));
+    if (hasSubstantialMatch) return true;
+  }
+
+  return inputTokens.every(tok => dbTokens.includes(tok));
+}
+
 export async function registerStudent(req: Request, res: Response): Promise<void> {
   try {
     const { name, usn, phone, email, password, semesterId, branchId, sectionId, semesterNumber, branchCode, sectionName } = req.body;
@@ -22,6 +45,11 @@ export async function registerStudent(req: Request, res: Response): Promise<void
 
     if (String(password).length < 8) {
       res.status(400).json({ error: 'Password must be at least 8 characters long for security.' });
+      return;
+    }
+
+    if (String(password).length > 128) {
+      res.status(400).json({ error: 'Password must not exceed 128 characters.' });
       return;
     }
 
@@ -47,15 +75,7 @@ export async function registerStudent(req: Request, res: Response): Promise<void
       }
 
       // Preloaded on roster without password: verify student's name to prevent impostor claiming
-      const dbNameNorm = existingStudent.name.trim().toLowerCase().replace(/\s+/g, ' ');
-      const inputNameNorm = cleanName.toLowerCase().replace(/\s+/g, ' ');
-
-      const nameMatches =
-        dbNameNorm === inputNameNorm ||
-        dbNameNorm.includes(inputNameNorm) ||
-        inputNameNorm.includes(dbNameNorm);
-
-      if (!nameMatches) {
+      if (!isNameMatching(existingStudent.name, cleanName)) {
         res.status(400).json({
           error: `The provided name does not match campus records for USN ${cleanUsn}. Please enter your official registered name.`,
         });
@@ -268,6 +288,11 @@ export async function activateStudent(req: Request, res: Response): Promise<void
       return;
     }
 
+    if (String(password).length > 128) {
+      res.status(400).json({ error: 'Password must not exceed 128 characters.' });
+      return;
+    }
+
     const cleanUsn = String(usn).trim().toUpperCase();
 
     const student = await prisma.student.findUnique({
@@ -290,10 +315,14 @@ export async function activateStudent(req: Request, res: Response): Promise<void
       return;
     }
 
+    // SEC-CRIT-01: Verification must be strictly mandatory
+    if (!name && !email) {
+      res.status(400).json({ error: 'Verification required. Please provide your registered name or email to claim your account.' });
+      return;
+    }
+
     if (name) {
-      const dbNameNorm = student.name.trim().toLowerCase().replace(/\s+/g, ' ');
-      const inputNameNorm = String(name).trim().toLowerCase().replace(/\s+/g, ' ');
-      if (!dbNameNorm.includes(inputNameNorm) && !inputNameNorm.includes(dbNameNorm)) {
+      if (!isNameMatching(student.name, String(name))) {
         res.status(400).json({ error: 'The provided name does not match the registered academic record.' });
         return;
       }
@@ -303,6 +332,9 @@ export async function activateStudent(req: Request, res: Response): Promise<void
         res.status(400).json({ error: 'The provided email does not match the registered academic record.' });
         return;
       }
+    } else {
+      res.status(400).json({ error: 'The registered student record has no email on file. Please verify using your registered name.' });
+      return;
     }
 
     // Hash the student's chosen password

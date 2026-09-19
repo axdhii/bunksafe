@@ -15,6 +15,11 @@ export const AdminSubjects: React.FC = () => {
   const [editingSub, setEditingSub] = useState<any | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
 
+  // Submission & Anti-spam state
+  const [submitting, setSubmitting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
   const [formCode, setFormCode] = useState('');
   const [formName, setFormName] = useState('');
   const [formCredits, setFormCredits] = useState(4);
@@ -48,6 +53,8 @@ export const AdminSubjects: React.FC = () => {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
+    setSubmitting(true);
     try {
       await apiRequest('/academic/subjects', {
         method: 'POST',
@@ -65,13 +72,17 @@ export const AdminSubjects: React.FC = () => {
       setFormName('');
       loadData();
     } catch (err: any) {
-      alert(err.message || 'Failed to create subject.');
+      setErrorMessage(err.message || 'Failed to create subject.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingSub) return;
+    setErrorMessage(null);
+    setSubmitting(true);
     try {
       await apiRequest(`/academic/subjects/${editingSub.id}`, {
         method: 'PUT',
@@ -84,22 +95,29 @@ export const AdminSubjects: React.FC = () => {
       setEditingSub(null);
       loadData();
     } catch (err: any) {
-      alert(err.message || 'Failed to update subject.');
+      setErrorMessage(err.message || 'Failed to update subject.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
+    setErrorMessage(null);
+    setDeleting(true);
     try {
       await apiRequest(`/academic/subjects/${deleteTarget.id}`, { method: 'DELETE' });
       setDeleteTarget(null);
       loadData();
     } catch (err: any) {
-      alert(err.message || 'Cannot delete subject with existing timetable or attendance entries.');
+      setErrorMessage(err.message || 'Cannot delete subject with existing timetable or attendance entries.');
+    } finally {
+      setDeleting(false);
     }
   };
 
   const openEdit = (sub: any) => {
+    setErrorMessage(null);
     setEditingSub(sub);
     setFormCode(sub.code);
     setFormName(sub.name);
@@ -125,6 +143,7 @@ export const AdminSubjects: React.FC = () => {
         actions={
           <button
             onClick={() => {
+              setErrorMessage(null);
               setFormCode('');
               setFormName('');
               setFormCredits(4);
@@ -181,7 +200,10 @@ export const AdminSubjects: React.FC = () => {
                         <Edit2 className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => setDeleteTarget(sub)}
+                        onClick={() => {
+                          setErrorMessage(null);
+                          setDeleteTarget(sub);
+                        }}
                         className="p-1.5 text-slate-400 hover:text-rose-400 rounded-lg"
                         title="Delete Subject"
                       >
@@ -199,6 +221,12 @@ export const AdminSubjects: React.FC = () => {
       {/* Modal Add Subject */}
       <Modal isOpen={showAddModal} onClose={() => setShowAddModal(false)} title="Add Subject">
         <form onSubmit={handleCreate} className="space-y-4 text-xs">
+          {errorMessage && (
+            <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300">
+              {errorMessage}
+            </div>
+          )}
+
           <div>
             <label className="block font-semibold text-slate-300 mb-1">Subject Code</label>
             <input
@@ -283,9 +311,11 @@ export const AdminSubjects: React.FC = () => {
 
           <button
             type="submit"
-            className="w-full mt-2 py-2.5 rounded-xl bg-white text-black font-bold font-sans text-xs hover:bg-zinc-200 transition-all"
+            disabled={submitting}
+            className="w-full mt-2 py-2.5 rounded-xl bg-white text-black font-bold font-sans text-xs hover:bg-zinc-200 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Create Subject
+            {submitting ? <Sparkles className="w-4 h-4 animate-spin text-black" /> : null}
+            <span>{submitting ? 'Creating Subject...' : 'Create Subject'}</span>
           </button>
         </form>
       </Modal>
@@ -293,6 +323,12 @@ export const AdminSubjects: React.FC = () => {
       {/* Modal Edit Subject */}
       <Modal isOpen={!!editingSub} onClose={() => setEditingSub(null)} title="Edit Subject">
         <form onSubmit={handleUpdate} className="space-y-4 text-xs">
+          {errorMessage && (
+            <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300">
+              {errorMessage}
+            </div>
+          )}
+
           <div>
             <label className="block font-semibold text-slate-400 mb-1">Subject Code (Fixed)</label>
             <input
@@ -343,9 +379,11 @@ export const AdminSubjects: React.FC = () => {
 
           <button
             type="submit"
-            className="w-full mt-2 py-2.5 rounded-xl bg-white text-black font-bold font-sans text-xs hover:bg-zinc-200 transition-all"
+            disabled={submitting}
+            className="w-full mt-2 py-2.5 rounded-xl bg-white text-black font-bold font-sans text-xs hover:bg-zinc-200 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Save Subject Changes
+            {submitting ? <Sparkles className="w-4 h-4 animate-spin text-black" /> : null}
+            <span>{submitting ? 'Saving Changes...' : 'Save Subject Changes'}</span>
           </button>
         </form>
       </Modal>
@@ -353,6 +391,12 @@ export const AdminSubjects: React.FC = () => {
       {/* Delete Target Modal */}
       <Modal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Delete Course Subject">
         <div className="space-y-4">
+          {errorMessage && (
+            <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300">
+              {errorMessage}
+            </div>
+          )}
+
           <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300">
             <p className="font-bold text-white">
               Delete {deleteTarget?.code} ({deleteTarget?.name})?
@@ -370,9 +414,11 @@ export const AdminSubjects: React.FC = () => {
             </button>
             <button
               onClick={handleDelete}
-              className="px-4 py-2 rounded-xl bg-rose-500 text-white font-bold text-xs hover:bg-rose-600"
+              disabled={deleting}
+              className="px-4 py-2 rounded-xl bg-rose-500 text-white font-bold text-xs hover:bg-rose-600 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Confirm Delete
+              {deleting ? <Sparkles className="w-3.5 h-3.5 animate-spin text-white" /> : null}
+              <span>{deleting ? 'Deleting...' : 'Confirm Delete'}</span>
             </button>
           </div>
         </div>

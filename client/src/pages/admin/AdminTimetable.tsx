@@ -571,7 +571,7 @@ export const AdminTimetable: React.FC = () => {
             <button
               onClick={handleSaveAll}
               disabled={saving}
-              className="flex items-center gap-1.5 px-5 py-2.5 rounded-2xl bg-white text-black font-semibold text-xs uppercase tracking-wider hover:bg-zinc-200 active:scale-95 transition-all shadow-md"
+              className="flex items-center gap-1.5 px-5 py-2.5 rounded-2xl bg-white text-black font-semibold text-xs uppercase tracking-wider hover:bg-zinc-200 active:scale-95 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? <Sparkles className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
               <span>{saving ? 'Saving...' : 'Save Schedule'}</span>

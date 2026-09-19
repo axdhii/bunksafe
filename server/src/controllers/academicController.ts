@@ -5,6 +5,7 @@ import { logAuditAction } from '../services/auditService.js';
 
 // ==================== SEMESTERS ====================
 export async function getSemesters(req: Request, res: Response): Promise<void> {
+  res.setHeader('Cache-Control', 'public, s-maxage=120, stale-while-revalidate=600');
   const semesters = await prisma.semester.findMany({ orderBy: { number: 'asc' } });
   res.json({ semesters });
 }
@@ -33,7 +34,41 @@ export async function createSemester(req: Request, res: Response): Promise<void>
 export async function deleteSemester(req: Request, res: Response): Promise<void> {
   try {
     const id = String(req.params.id);
-    await prisma.semester.delete({ where: { id } });
+    const semester = await prisma.semester.findUnique({ where: { id } });
+    if (!semester) {
+      res.status(404).json({ error: 'Semester not found.' });
+      return;
+    }
+
+    // Check for enrolled students
+    const studentCount = await prisma.student.count({ where: { semesterId: id } });
+    if (studentCount > 0) {
+      res.status(400).json({
+        error: `Cannot delete "${semester.name}": ${studentCount} student(s) are currently enrolled. Please reassign or remove them first.`,
+      });
+      return;
+    }
+
+    // Check for active attendance records
+    const attendanceCount = await prisma.attendance.count({
+      where: { subject: { semesterId: id } },
+    });
+    if (attendanceCount > 0) {
+      res.status(400).json({
+        error: `Cannot delete "${semester.name}": contains courses with recorded attendance history.`,
+      });
+      return;
+    }
+
+    // Clean transactional cascade for empty child artifacts
+    await prisma.$transaction(async (tx) => {
+      await tx.timetableEntry.deleteMany({ where: { timetable: { semesterId: id } } });
+      await tx.timetable.deleteMany({ where: { semesterId: id } });
+      await tx.subject.deleteMany({ where: { semesterId: id } });
+      await tx.section.deleteMany({ where: { semesterId: id } });
+      await tx.semester.delete({ where: { id } });
+    });
+
     await logAuditAction({
       actorEmail: req.user!.email || 'admin',
       actorRole: 'ADMIN',
@@ -44,12 +79,14 @@ export async function deleteSemester(req: Request, res: Response): Promise<void>
     });
     res.json({ success: true });
   } catch (error: any) {
-    res.status(400).json({ error: 'Cannot delete semester with linked sections, subjects, or students.' });
+    console.error('deleteSemester error:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete semester.' });
   }
 }
 
 // ==================== BRANCHES ====================
 export async function getBranches(req: Request, res: Response): Promise<void> {
+  res.setHeader('Cache-Control', 'public, s-maxage=120, stale-while-revalidate=600');
   const branches = await prisma.branch.findMany({ orderBy: { code: 'asc' } });
   res.json({ branches });
 }
@@ -81,7 +118,64 @@ export async function createBranch(req: Request, res: Response): Promise<void> {
 export async function deleteBranch(req: Request, res: Response): Promise<void> {
   try {
     const id = String(req.params.id);
-    await prisma.branch.delete({ where: { id } });
+    const branch = await prisma.branch.findUnique({ where: { id } });
+    if (!branch) {
+      res.status(404).json({ error: 'Branch not found.' });
+      return;
+    }
+
+    // 1. Verify students enrolled in this branch (distinguish active and inactive students)
+    const [activeStudents, inactiveStudents] = await Promise.all([
+      prisma.student.count({
+        where: {
+          active: true,
+          OR: [{ branchId: id }, { section: { branchId: id } }],
+        },
+      }),
+      prisma.student.count({
+        where: {
+          active: false,
+          OR: [{ branchId: id }, { section: { branchId: id } }],
+        },
+      }),
+    ]);
+
+    const totalStudents = activeStudents + inactiveStudents;
+    if (totalStudents > 0) {
+      const breakdown =
+        activeStudents > 0 && inactiveStudents > 0
+          ? ` (${activeStudents} active, ${inactiveStudents} archived/inactive)`
+          : '';
+      res.status(400).json({
+        error: `Cannot delete branch "${branch.name}" (${branch.code}): ${totalStudents} student record(s) assigned to this department${breakdown}. Please reassign or remove students first.`,
+      });
+      return;
+    }
+
+    // 3. Verify attendance records for subjects in this branch
+    const attendanceCount = await prisma.attendance.count({
+      where: { subject: { branchId: id } },
+    });
+    if (attendanceCount > 0) {
+      res.status(400).json({
+        error: `Cannot delete branch "${branch.name}" (${branch.code}): historical student attendance records exist for courses in this department.`,
+      });
+      return;
+    }
+
+    // 4. Clean transactional cascade of empty child artifacts
+    await prisma.$transaction(async (tx) => {
+      // Clean timetable entries and timetable headers for this branch
+      await tx.timetableEntry.deleteMany({ where: { timetable: { branchId: id } } });
+      await tx.timetable.deleteMany({ where: { branchId: id } });
+      // Clean empty subjects belonging to this branch
+      await tx.subject.deleteMany({ where: { branchId: id } });
+      // Clean sections belonging to this branch (verified 0 students)
+      await tx.section.deleteMany({ where: { branchId: id } });
+      // Delete the branch record
+      await tx.branch.delete({ where: { id } });
+    });
+
     await logAuditAction({
       actorEmail: req.user!.email || 'admin',
       actorRole: 'ADMIN',
@@ -90,14 +184,16 @@ export async function deleteBranch(req: Request, res: Response): Promise<void> {
       targetId: id,
       ipAddress: req.ip,
     });
-    res.json({ success: true });
+    res.json({ success: true, message: `Branch ${branch.code} removed successfully.` });
   } catch (error: any) {
-    res.status(400).json({ error: 'Cannot delete branch with active students or subjects.' });
+    console.error('deleteBranch error:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete branch.' });
   }
 }
 
 // ==================== SECTIONS ====================
 export async function getSections(req: Request, res: Response): Promise<void> {
+  res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
   const { semesterId, branchId } = req.query;
   const where: any = {};
   if (semesterId) where.semesterId = String(semesterId);
@@ -140,10 +236,33 @@ export async function createSection(req: Request, res: Response): Promise<void> 
 export async function deleteSection(req: Request, res: Response): Promise<void> {
   try {
     const id = String(req.params.id);
-    await prisma.section.delete({ where: { id } });
-    res.json({ success: true });
+    const section = await prisma.section.findUnique({
+      where: { id },
+      include: { branch: true },
+    });
+    if (!section) {
+      res.status(404).json({ error: 'Section not found.' });
+      return;
+    }
+
+    const studentCount = await prisma.student.count({ where: { sectionId: id } });
+    if (studentCount > 0) {
+      res.status(400).json({
+        error: `Cannot delete Section "${section.name}": ${studentCount} enrolled student(s) are assigned to this section.`,
+      });
+      return;
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.timetableEntry.deleteMany({ where: { timetable: { sectionId: id } } });
+      await tx.timetable.deleteMany({ where: { sectionId: id } });
+      await tx.section.delete({ where: { id } });
+    });
+
+    res.json({ success: true, message: `Section ${section.name} removed successfully.` });
   } catch (error: any) {
-    res.status(400).json({ error: 'Cannot delete section with active students or timetable.' });
+    console.error('deleteSection error:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete section.' });
   }
 }
 
@@ -221,7 +340,25 @@ export async function updateSubject(req: Request, res: Response): Promise<void> 
 export async function deleteSubject(req: Request, res: Response): Promise<void> {
   try {
     const id = String(req.params.id);
-    await prisma.subject.delete({ where: { id } });
+    const subject = await prisma.subject.findUnique({ where: { id } });
+    if (!subject) {
+      res.status(404).json({ error: 'Subject not found.' });
+      return;
+    }
+
+    const attendanceCount = await prisma.attendance.count({ where: { subjectId: id } });
+    if (attendanceCount > 0) {
+      res.status(400).json({
+        error: `Cannot delete subject "${subject.code}": ${attendanceCount} student attendance record(s) exist.`,
+      });
+      return;
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.timetableEntry.deleteMany({ where: { subjectId: id } });
+      await tx.subject.delete({ where: { id } });
+    });
+
     await logAuditAction({
       actorEmail: req.user!.email || 'admin',
       actorRole: 'ADMIN',
@@ -230,9 +367,10 @@ export async function deleteSubject(req: Request, res: Response): Promise<void> 
       targetId: id,
       ipAddress: req.ip,
     });
-    res.json({ success: true });
+    res.json({ success: true, message: `Subject ${subject.code} deleted successfully.` });
   } catch (error: any) {
-    res.status(400).json({ error: 'Cannot delete subject that has timetable entries or attendance records.' });
+    console.error('deleteSubject error:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete subject.' });
   }
 }
 

@@ -33,11 +33,44 @@ export interface ExtractedTimetableResult {
 }
 
 const FALLBACK_MODELS = [
-  'gemini-3.1-flash-lite',
-  'gemini-3.7-flash',
   'gemini-3.6-flash',
+  'gemini-3.7-flash',
+  'gemini-3.1-flash-lite',
   'gemini-flash-latest',
 ];
+
+export function mergeConsecutiveScheduleEntries(entries: ExtractedScheduleEntry[]): ExtractedScheduleEntry[] {
+  const sorted = [...entries].sort((a, b) => {
+    if (a.dayOfWeek !== b.dayOfWeek) return a.dayOfWeek - b.dayOfWeek;
+    if (a.startTime !== b.startTime) return a.startTime.localeCompare(b.startTime);
+    if ((a.batch || '') !== (b.batch || '')) return (a.batch || '').localeCompare(b.batch || '');
+    return (a.subjectCode || '').localeCompare(b.subjectCode || '');
+  });
+
+  const merged: ExtractedScheduleEntry[] = [];
+
+  for (const entry of sorted) {
+    const candidate = merged.find(
+      (m) =>
+        m.dayOfWeek === entry.dayOfWeek &&
+        ((m.subjectCode && m.subjectCode === entry.subjectCode) ||
+          (!m.subjectCode && !entry.subjectCode && (m.title || m.subjectName) === (entry.title || entry.subjectName))) &&
+        (m.batch || 'ALL') === (entry.batch || 'ALL') &&
+        m.endTime === entry.startTime
+    );
+
+    if (candidate) {
+      candidate.endTime = entry.endTime;
+      if (!candidate.faculty && entry.faculty) candidate.faculty = entry.faculty;
+      if (!candidate.room && entry.room) candidate.room = entry.room;
+      if (entry.type === 'LAB' || candidate.type === 'LAB') candidate.type = 'LAB';
+    } else {
+      merged.push({ ...entry });
+    }
+  }
+
+  return merged;
+}
 
 export async function parseTimetableImageWithGemini(
   imageBuffer: Buffer,
@@ -54,18 +87,32 @@ export async function parseTimetableImageWithGemini(
 Analyze this official engineering college timetable document and extract the complete weekly schedule.
 
 CRITICAL PARSING RULES:
-1. COMPLETE ALL DAYS (DO NOT STOP EARLY):
-   - You MUST extract the schedule for EVERY day row shown in the table:
-     * Monday (dayOfWeek: 1)
-     * Tuesday (dayOfWeek: 2)
-     * Wednesday (dayOfWeek: 3)
-     * Thursday (dayOfWeek: 4)
-     * Friday (dayOfWeek: 5)
-     * Saturday (dayOfWeek: 6, if classes/activities are listed)
-   - DO NOT STOP after Monday or Tuesday! Every single row from Monday to Friday MUST be completely parsed.
-   - Expect 20 to 30 total schedule entries for a full college week.
+1. MERGED / MULTI-PERIOD CELLS (CRITICAL):
+   - In college timetables, practical labs, mini-projects, workshops, sports, and certifications span across 2 or more consecutive periods in the grid (e.g. columns 11.10AM TO 12.05PM and 12.05PM TO 1.00PM are merged into a single 2-hour block).
+   - NEVER emit duplicate entries for each individual period column of a merged block!
+   - Combine the merged span into ONE single entry from the start time of the first period to the end time of the last period.
+   - Example 1: Monday 11:10AM to 1:00PM shows "DVLab(A1)(SSR)/CN lab(A2)(AM)":
+     Emit EXACTLY TWO entries for the entire 2-hour 11:10-13:00 block (ONE per batch):
+     1) startTime: "11:10", endTime: "13:00", subjectCode: "BAIL504", subjectName: "Data Visualization Lab", batch: "A1", room: "DV-Lab-A-307", faculty: "SSR", type: "LAB"
+     2) startTime: "11:10", endTime: "13:00", subjectCode: "BCS502", subjectName: "Computer Networks Lab", batch: "A2", room: "CN labA--323", faculty: "AM", type: "LAB"
+   - Example 2: Thursday 9:00AM to 10:50AM shows "DVLab(A2)(SSR)/CN lab(A1)(AM)":
+     Emit EXACTLY TWO entries for the entire 09:00-10:50 block (ONE per batch):
+     1) startTime: "09:00", endTime: "10:50", subjectCode: "BAIL504", subjectName: "Data Visualization Lab", batch: "A2", room: "DV-Lab-A-307", faculty: "SSR", type: "LAB"
+     2) startTime: "09:00", endTime: "10:50", subjectCode: "BCS502", subjectName: "Computer Networks Lab", batch: "A1", room: "CN labA--323", faculty: "AM", type: "LAB"
+   - Example 3: Tuesday and Wednesday 11:10AM to 1:00PM shows "Miniproject( L-423)":
+     Emit ONE entry for 11:10-13:00:
+     startTime: "11:10", endTime: "13:00", subjectCode: "BCI586", subjectName: "Mini Project", batch: "ALL", room: "L-423", faculty: "Mrs. Nisha A Rai", type: "LAB"
+   - Example 4: Monday 3:05PM to 4:55PM shows "Certification":
+     Emit ONE entry: startTime: "15:05", endTime: "16:55", subjectCode: "CERT", subjectName: "Certification", batch: "ALL", type: "OTHER"
+   - Example 5: Friday 3:05PM to 4:55PM shows "NSS/Yoga/Sports":
+     Emit ONE entry: startTime: "15:05", endTime: "16:55", subjectCode: "NSS", subjectName: "NSS/Yoga/Sports", batch: "ALL", type: "OTHER"
 
-2. LEGEND / SUBJECT TABLE:
+2. COMPLETE ALL DAYS AND AFTERNOON SESSIONS (DO NOT STOP EARLY):
+   - You MUST extract the schedule for EVERY day row shown in the table from Monday to Friday, and Saturday if listed.
+   - Be sure to extract afternoon sessions from 2:00PM to 4:55PM for every day (e.g. Unix, Certification, EVS, Library, Counselling, NSS/Yoga/Sports).
+   - DO NOT STOP after morning sessions!
+
+3. LEGEND / SUBJECT TABLE:
    - Carefully inspect the bottom/side subject list or legend.
    - For every course, extract:
      * code: Official subject code (e.g. "BCS501", "BCS502", "BCS503", "BAIL504", "BCS515C", "BCI586", "BRMK557", "BCS508")
@@ -74,15 +121,10 @@ CRITICAL PARSING RULES:
      * type: "LECTURE" | "LAB" | "TUTORIAL" | "OTHER"
      * credits: Number (default 4 for theory, 2 for labs if not stated)
 
-3. SCHEDULE GRID:
+4. SCHEDULE GRID:
    - Days: Monday=1, Tuesday=2, Wednesday=3, Thursday=4, Friday=5, Saturday=6.
    - Times: Normalize all times to 24-hour "HH:MM" format (e.g. 09:00, 09:55, 10:50, 11:10, 12:05, 13:00, 14:00, 14:55, 15:05, 16:00, 16:55).
    - Resolve Abbreviations: Every timetable cell containing a course abbreviation MUST be resolved to its official subjectCode from the legend.
-   - Split Lab Batches:
-     * When a period shows split batches like "DVLab(A1)(SSR)/CN lab(A2)(AM)":
-       Emit TWO distinct entry objects:
-       1) batch="A1", subjectCode="BAIL504", room="DV-Lab-A-307", faculty="SSR", type="LAB"
-       2) batch="A2", subjectCode="BCS502", room="CN labA--323", faculty="AM", type="LAB"
    - For regular whole-class lectures, set batch="ALL".
    - Classroom: Use the default classroom from the header (e.g. "A-405") unless the cell or header specifies a specialized lab room.
    - Exclude lunch breaks and tea breaks, or mark them with type="INTERVAL".
@@ -147,10 +189,13 @@ Return strictly valid JSON matching this structure:
   for (const model of FALLBACK_MODELS) {
     try {
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+          },
           body: JSON.stringify(payload),
         }
       );
@@ -202,6 +247,9 @@ Return strictly valid JSON matching this structure:
           }
         }
 
+        let entryType = String(e.type || 'LECTURE').trim().toUpperCase();
+        if (entryType === 'THEORY') entryType = 'LECTURE';
+
         return {
           dayOfWeek: dayNum || 1,
           startTime: String(e.startTime || '').trim(),
@@ -210,25 +258,28 @@ Return strictly valid JSON matching this structure:
           subjectName: e.subjectName ? String(e.subjectName).trim() : undefined,
           faculty: e.faculty ? String(e.faculty).trim() : undefined,
           room: e.room ? String(e.room).trim() : undefined,
-          type: e.type || 'LECTURE',
+          type: entryType,
           batch: e.batch ? String(e.batch).trim().toUpperCase() : 'ALL',
           title: e.title ? String(e.title).trim() : undefined,
         };
       });
 
+      // Deterministically merge any consecutive slots for the same subject/batch across multi-period blocks
+      const cleanedSchedule = mergeConsecutiveScheduleEntries(schedule);
+
       // Completeness Gate: If a model extracted fewer than 15 entries or fewer than 4 distinct days,
       // it prematurely stopped. Reject and try next fallback model if available.
-      const uniqueDays = new Set(schedule.map((s) => s.dayOfWeek));
-      if (schedule.length < 15 && uniqueDays.size < 4 && model !== FALLBACK_MODELS[FALLBACK_MODELS.length - 1]) {
-        console.warn(`[AI Scanner] Model ${model} returned partial schedule (${schedule.length} entries, ${uniqueDays.size} days). Trying fallback...`);
-        lastError = new Error(`Model ${model} returned incomplete schedule (${schedule.length} entries, ${uniqueDays.size} days).`);
+      const uniqueDays = new Set(cleanedSchedule.map((s) => s.dayOfWeek));
+      if (cleanedSchedule.length < 15 && uniqueDays.size < 4 && model !== FALLBACK_MODELS[FALLBACK_MODELS.length - 1]) {
+        console.warn(`[AI Scanner] Model ${model} returned partial schedule (${cleanedSchedule.length} entries, ${uniqueDays.size} days). Trying fallback...`);
+        lastError = new Error(`Model ${model} returned incomplete schedule (${cleanedSchedule.length} entries, ${uniqueDays.size} days).`);
         continue;
       }
 
       return {
         metadata: parsed.metadata || {},
         subjects,
-        schedule,
+        schedule: cleanedSchedule,
       };
     } catch (err: any) {
       lastError = err;

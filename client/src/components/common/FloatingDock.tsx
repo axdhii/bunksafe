@@ -37,12 +37,12 @@ export const FloatingDock: React.FC<{
 
   return (
     <div
-      className={`fixed bottom-3 sm:bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center justify-center pointer-events-auto max-w-[96vw] ${className}`}
+      className={`fixed bottom-[calc(0.75rem+var(--sab))] sm:bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center justify-center pointer-events-auto max-w-[98vw] ${className}`}
     >
       <motion.div
         onMouseMove={(e) => mouseX.set(e.pageX)}
         onMouseLeave={() => mouseX.set(Infinity)}
-        className="mx-auto flex h-14 sm:h-16 items-center gap-1.5 sm:gap-3 rounded-full sm:rounded-3xl bg-black/75 px-3 sm:px-4 py-1.5 sm:py-2 border border-white/10 backdrop-blur-2xl shadow-2xl shadow-black/80 ring-1 ring-white/5"
+        className="mx-auto flex h-14 sm:h-16 items-center gap-1.5 sm:gap-3 rounded-full sm:rounded-3xl bg-black/80 px-2.5 sm:px-4 py-1.5 sm:py-2 border border-white/10 backdrop-blur-2xl shadow-2xl shadow-black/90 ring-1 ring-white/5"
       >
         {items.map((item) => (
           <FloatingDockIcon
@@ -95,7 +95,7 @@ const FloatingDockIcon: React.FC<{
               initial={{ opacity: 0, y: 10, x: '-50%' }}
               animate={{ opacity: 1, y: 0, x: '-50%' }}
               exit={{ opacity: 0, y: 2, x: '-50%' }}
-              className="absolute -top-9 left-1/2 -translate-x-1/2 whitespace-pre rounded-lg bg-zinc-900 px-2 py-0.5 text-[11px] font-sub text-zinc-200 border border-white/10 shadow-xl pointer-events-none"
+              className="hidden sm:block absolute -top-9 left-1/2 -translate-x-1/2 whitespace-pre rounded-lg bg-zinc-900 px-2 py-0.5 text-[11px] font-sub text-zinc-200 border border-white/10 shadow-xl pointer-events-none"
             >
               {item.title}
             </motion.div>

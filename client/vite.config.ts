@@ -78,6 +78,34 @@ export default defineConfig({
                 statuses: [0, 200]
               }
             }
+          },
+          {
+            urlPattern: /\/api\/academic\/(semesters|branches|sections)/i,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'api-academic-cache',
+              expiration: {
+                maxEntries: 30,
+                maxAgeSeconds: 60 * 60 * 24 // 24 hours
+              },
+              cacheableResponse: {
+                statuses: [0, 200]
+              }
+            }
+          },
+          {
+            urlPattern: /\/api\/timetable\/(student|section)/i,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'api-timetable-cache',
+              expiration: {
+                maxEntries: 20,
+                maxAgeSeconds: 60 * 60 * 12 // 12 hours
+              },
+              cacheableResponse: {
+                statuses: [0, 200]
+              }
+            }
           }
         ]
       }

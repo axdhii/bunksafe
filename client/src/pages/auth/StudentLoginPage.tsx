@@ -10,9 +10,20 @@ import {
   EyeOff,
   UserPlus,
   ChevronDown,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+import { apiRequest } from '../../api/client';
 import { SparklesCore } from '../../components/common/Sparkles';
+
+const DEFAULT_BRANCHES = [
+  { code: 'CSE', name: 'Computer Science & Engineering' },
+  { code: 'CSE-AIML', name: 'Artificial Intelligence & Machine Learning' },
+  { code: 'ISE', name: 'Information Science & Engineering' },
+  { code: 'ECE', name: 'Electronics & Communication' },
+  { code: 'ME', name: 'Mechanical Engineering' },
+  { code: 'CV', name: 'Civil Engineering' },
+];
 
 export const StudentLoginPage: React.FC = () => {
   const { loginStudent } = useAuth();
@@ -25,6 +36,7 @@ export const StudentLoginPage: React.FC = () => {
 
   // Optional Academic Cohort
   const [showCohortDetails, setShowCohortDetails] = useState(false);
+  const [branches, setBranches] = useState<any[]>(DEFAULT_BRANCHES);
   const [semesterNumber, setSemesterNumber] = useState<number>(5);
   const [branchCode, setBranchCode] = useState('CSE');
   const [sectionName, setSectionName] = useState('A');
@@ -33,13 +45,21 @@ export const StudentLoginPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [setupRequired, setSetupRequired] = useState(false);
 
-  // Load remembered USN on mount
+  // Load branches & remembered USN on mount
   useEffect(() => {
     const savedUsn = localStorage.getItem('bunk_remember_usn');
     if (savedUsn) {
       setUsn(savedUsn);
       setRememberMe(true);
     }
+
+    apiRequest<{ branches: any[] }>('/academic/branches')
+      .then((res) => {
+        if (res?.branches?.length) {
+          setBranches(res.branches);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -278,21 +298,31 @@ export const StudentLoginPage: React.FC = () => {
                   </div>
                   <div>
                     <label className="block text-[10px] text-zinc-400 mb-1 font-sub">Branch</label>
-                    <input
-                      type="text"
+                    <select
                       value={branchCode}
-                      onChange={(e) => setBranchCode(e.target.value.toUpperCase())}
-                      className="w-full px-2 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-white font-mono text-xs uppercase outline-none"
-                    />
+                      onChange={(e) => setBranchCode(e.target.value)}
+                      className="w-full px-2 py-2 rounded-xl bg-black border border-white/10 text-white text-xs outline-none font-sans"
+                    >
+                      {branches.map((b) => (
+                        <option key={b.code || b.id} value={b.code}>
+                          {b.code}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-[10px] text-zinc-400 mb-1 font-sub">Section</label>
-                    <input
-                      type="text"
+                    <select
                       value={sectionName}
-                      onChange={(e) => setSectionName(e.target.value.toUpperCase())}
-                      className="w-full px-2 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-white font-mono text-xs uppercase outline-none"
-                    />
+                      onChange={(e) => setSectionName(e.target.value)}
+                      className="w-full px-2 py-2 rounded-xl bg-black border border-white/10 text-white text-xs outline-none font-sans"
+                    >
+                      {['A', 'B', 'C', 'D'].map((sec) => (
+                        <option key={sec} value={sec}>
+                          Sec {sec}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               </div>
@@ -302,10 +332,19 @@ export const StudentLoginPage: React.FC = () => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-4 rounded-xl bg-white text-black font-sans font-bold text-xs uppercase tracking-wider hover:bg-zinc-200 active:scale-[0.98] transition-all flex items-center justify-center gap-2 mt-3 shadow-lg cursor-pointer"
+              className="w-full py-4 rounded-xl bg-white disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed text-black font-sans font-bold text-xs uppercase tracking-wider hover:bg-zinc-200 active:scale-[0.98] transition-all flex items-center justify-center gap-2 mt-3 shadow-lg cursor-pointer"
             >
-              <span>{loading ? 'Authenticating...' : 'Access Dashboard'}</span>
-              <ArrowRight className="w-4 h-4" />
+              {loading ? (
+                <>
+                  <Sparkles className="w-4 h-4 animate-spin text-zinc-400" />
+                  <span>Authenticating...</span>
+                </>
+              ) : (
+                <>
+                  <span>Access Dashboard</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
             </button>
           </form>
 

@@ -3,6 +3,35 @@ import { prisma } from '../prisma/client.js';
 import { calculateAttendance, calculateProjectionScenario, calculateAttendanceStreak, RiskLevel } from '../utils/attendanceEngine.js';
 import { sendSmartNotification } from '../services/notificationService.js';
 
+export function getCollegeDate(refDate: Date = new Date()): { dateStr: string; dayOfWeek: number } {
+  // Asia/Kolkata timezone ensures serverless hosts in UTC resolve the correct campus day
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const dateStr = formatter.format(refDate);
+
+  const dayFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Kolkata',
+    weekday: 'short',
+  });
+  const weekday = dayFormatter.format(refDate);
+  const weekdayMap: Record<string, number> = {
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+    Sun: 7,
+  };
+  const dayOfWeek = weekdayMap[weekday] || 1;
+
+  return { dateStr, dayOfWeek };
+}
+
 export async function getDashboard(req: Request, res: Response): Promise<void> {
   try {
     const studentId = req.user!.studentId!;
@@ -115,12 +144,8 @@ export async function getDashboard(req: Request, res: Response): Promise<void> {
     // 7. Compute streaks
     const { currentStreak, longestStreak } = calculateAttendanceStreak(attendanceRecords);
 
-    // 8. Determine today's classes
-    const today = new Date();
-    // getDay: 0 is Sunday, 1 is Monday ... 6 is Saturday
-    const jsDay = today.getDay();
-    const dayOfWeek = jsDay === 0 ? 7 : jsDay;
-    const todayDateStr = today.toISOString().split('T')[0];
+    // 8. Determine today's classes in College timezone (Asia/Kolkata)
+    const { dateStr: todayDateStr, dayOfWeek } = getCollegeDate();
 
     // PERF-2: Run timetable + notification count in parallel
     const [timetable, unreadNotificationCount] = await Promise.all([
@@ -147,9 +172,13 @@ export async function getDashboard(req: Request, res: Response): Promise<void> {
     ]);
 
     const todayClasses = (timetable?.entries || []).map((entry) => {
-      // Check if student has already marked attendance for this class today
+      // Check if student has already marked attendance for this specific slot today
       const marked = attendanceRecords.find(
-        (r) => r.date === todayDateStr && (r.timetableEntryId === entry.id || (entry.subjectId && r.subjectId === entry.subjectId))
+        (r) =>
+          r.date === todayDateStr &&
+          (r.timetableEntryId
+            ? r.timetableEntryId === entry.id
+            : (entry.subjectId && r.subjectId === entry.subjectId))
       );
 
       const subStat = entry.subjectId ? subjectStats.find((s) => s.id === entry.subjectId) : undefined;
@@ -239,12 +268,27 @@ export async function markAttendance(req: Request, res: Response): Promise<void>
       return;
     }
 
+    // SEC-HIGH-02: Verify student exists and subject belongs to student's enrolled cohort
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: { semesterId: true, branchId: true },
+    });
+    if (!student) {
+      res.status(404).json({ error: 'Student not found.' });
+      return;
+    }
+
     // Verify subject exists
     const subject = await prisma.subject.findUnique({
       where: { id: subjectId },
     });
     if (!subject) {
       res.status(404).json({ error: 'Subject not found.' });
+      return;
+    }
+
+    if (subject.semesterId !== student.semesterId || subject.branchId !== student.branchId) {
+      res.status(403).json({ error: 'Subject does not belong to your enrolled academic cohort.' });
       return;
     }
 
@@ -339,10 +383,7 @@ export async function batchMarkTodayPresent(req: Request, res: Response): Promis
       return;
     }
 
-    const today = new Date();
-    const jsDay = today.getDay();
-    const dayOfWeek = jsDay === 0 ? 7 : jsDay;
-    const todayDateStr = today.toISOString().split('T')[0];
+    const { dateStr: todayDateStr, dayOfWeek } = getCollegeDate();
 
     const timetable = await prisma.timetable.findFirst({
       where: {
@@ -363,7 +404,19 @@ export async function batchMarkTodayPresent(req: Request, res: Response): Promis
       return;
     }
 
-    const validClassEntries = timetable.entries.filter((entry) => entry.subjectId !== null);
+    // LOGIC-HIGH-03: Filter by student's batch to avoid over-crediting parallel split lab batches
+    const studentBatch = student.batch?.trim().toUpperCase();
+    const validClassEntries = timetable.entries.filter((entry) => {
+      if (!entry.subjectId) return false;
+      if (!entry.batch || entry.batch === 'ALL') return true;
+      if (!studentBatch) return true;
+      return entry.batch.toUpperCase() === studentBatch;
+    });
+
+    if (validClassEntries.length === 0) {
+      res.status(400).json({ error: "No classes scheduled for your batch today to mark." });
+      return;
+    }
 
     const operations = validClassEntries.map((entry) =>
       prisma.attendance.upsert({
@@ -393,7 +446,7 @@ export async function batchMarkTodayPresent(req: Request, res: Response): Promis
 
     res.json({
       success: true,
-      message: `Marked all ${timetable.entries.length} classes as present for today.`,
+      message: `Marked all ${validClassEntries.length} scheduled classes as present for today.`,
     });
   } catch (error: any) {
     console.error('batchMarkTodayPresent error:', error);
@@ -535,9 +588,22 @@ export async function syncOfflineAttendance(req: Request, res: Response): Promis
       return;
     }
 
+    // SEC-MED-01: Bound maximum items per sync payload to prevent denial-of-service
+    if (items.length > 100) {
+      res.status(400).json({ error: 'Maximum 100 attendance items can be synced at once.' });
+      return;
+    }
+
+    const validStatuses = ['PRESENT', 'ABSENT', 'CANCELLED', 'RESCHEDULED', 'HOLIDAY'];
     // PERF-5: Batch all upserts in a single transaction instead of sequential calls
     const validItems = items.filter(
-      (item: any) => item.subjectId && item.date && item.status
+      (item: any) =>
+        item.subjectId &&
+        item.date &&
+        typeof item.date === 'string' &&
+        /^\d{4}-\d{2}-\d{2}$/.test(item.date) &&
+        item.status &&
+        validStatuses.includes(item.status)
     );
 
     if (validItems.length === 0) {

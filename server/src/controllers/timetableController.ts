@@ -170,34 +170,35 @@ export async function confirmTimetableImport(req: Request, res: Response): Promi
       });
     }
 
-    // Atomically replace all entries in this timetable
-    await prisma.$transaction(async (tx) => {
-      // Delete old entries
-      await tx.timetableEntry.deleteMany({
-        where: { timetableId: timetable.id },
-      });
+    // Atomically replace all entries in this timetable with bulk createMany
+    const entriesData = entries.map((e) => {
+      const isBreak = ['INTERVAL', 'LUNCH', 'BREAK'].includes(e.type?.toUpperCase());
+      const subjectId = isBreak
+        ? null
+        : (e.subjectId || (e.subjectCode ? subjectMap.get(String(e.subjectCode).trim().toUpperCase()) : null));
 
-      // Insert new entries
-      for (const e of entries) {
-        const isBreak = ['INTERVAL', 'LUNCH', 'BREAK'].includes(e.type?.toUpperCase());
-        const subjectId = isBreak ? null : (e.subjectId || (e.subjectCode ? subjectMap.get(String(e.subjectCode).trim().toUpperCase()) : null));
-        
-        await tx.timetableEntry.create({
-          data: {
-            timetableId: timetable.id,
-            dayOfWeek: Number(e.dayOfWeek),
-            startTime: String(e.startTime),
-            endTime: String(e.endTime),
-            subjectId: subjectId || null,
-            title: e.title || (isBreak ? (e.type === 'LUNCH' ? 'Lunch Break' : 'Tea / Short Break') : null),
-            faculty: e.faculty || null,
-            room: e.room || null,
-            type: e.type || 'LECTURE',
-            batch: e.batch || 'ALL',
-          },
-        });
-      }
+      return {
+        timetableId: timetable.id,
+        dayOfWeek: Number(e.dayOfWeek),
+        startTime: String(e.startTime),
+        endTime: String(e.endTime),
+        subjectId: subjectId || null,
+        title: e.title || (isBreak ? (e.type === 'LUNCH' ? 'Lunch Break' : 'Tea / Short Break') : null),
+        faculty: e.faculty || null,
+        room: e.room || null,
+        type: e.type || 'LECTURE',
+        batch: e.batch || 'ALL',
+      };
     });
+
+    await prisma.$transaction([
+      prisma.timetableEntry.deleteMany({
+        where: { timetableId: timetable.id },
+      }),
+      prisma.timetableEntry.createMany({
+        data: entriesData,
+      }),
+    ]);
 
     await logAuditAction({
       actorEmail: req.user!.email || 'admin',

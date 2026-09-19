@@ -30,6 +30,11 @@ export const AdminStudents: React.FC = () => {
   const [formBranchId, setFormBranchId] = useState('');
   const [formSecId, setFormSecId] = useState('');
 
+  // Loading & Anti-spam state
+  const [submitting, setSubmitting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
   const loadData = useCallback(async () => {
     try {
       const [sRes, semRes, bRes, secRes] = await Promise.all([
@@ -59,6 +64,8 @@ export const AdminStudents: React.FC = () => {
 
   const handleCreateStudent = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
+    setSubmitting(true);
     try {
       await apiRequest('/academic/students', {
         method: 'POST',
@@ -77,13 +84,17 @@ export const AdminStudents: React.FC = () => {
       setFormEmail('');
       loadData();
     } catch (err: any) {
-      alert(err.message || 'Failed to create student.');
+      setErrorMessage(err.message || 'Failed to create student.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleUpdateStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingStudent) return;
+    setErrorMessage(null);
+    setSubmitting(true);
     try {
       await apiRequest(`/academic/students/${editingStudent.id}`, {
         method: 'PUT',
@@ -98,12 +109,16 @@ export const AdminStudents: React.FC = () => {
       setEditingStudent(null);
       loadData();
     } catch (err: any) {
-      alert(err.message || 'Failed to update student.');
+      setErrorMessage(err.message || 'Failed to update student.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleDeleteStudent = async () => {
     if (!deleteTarget) return;
+    setErrorMessage(null);
+    setDeleting(true);
     try {
       await apiRequest(`/academic/students/${deleteTarget.id}`, {
         method: 'DELETE',
@@ -111,7 +126,9 @@ export const AdminStudents: React.FC = () => {
       setDeleteTarget(null);
       loadData();
     } catch (err: any) {
-      alert(err.message || 'Failed to delete student.');
+      setErrorMessage(err.message || 'Failed to delete student.');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -293,8 +310,14 @@ export const AdminStudents: React.FC = () => {
       </div>
 
       {/* Modal Enroll Student */}
-      <Modal isOpen={showAddModal} onClose={() => setShowAddModal(false)} title="Enroll Student">
+      <Modal isOpen={showAddModal} onClose={() => { setShowAddModal(false); setErrorMessage(null); }} title="Enroll Student">
         <form onSubmit={handleCreateStudent} className="space-y-4 text-xs">
+          {errorMessage && (
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300 flex items-start gap-2 font-sub">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
           <div>
             <label className="block font-semibold text-slate-300 mb-1">USN (Unique)</label>
             <input
@@ -375,16 +398,30 @@ export const AdminStudents: React.FC = () => {
 
           <button
             type="submit"
-            className="w-full mt-2 py-2.5 rounded-xl bg-white text-black font-bold text-xs hover:bg-zinc-200 transition-all font-sans"
+            disabled={submitting}
+            className="w-full mt-2 py-2.5 rounded-xl bg-white disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed text-black font-bold text-xs hover:bg-zinc-200 transition-all font-sans flex items-center justify-center gap-2"
           >
-            Confirm Enrolment
+            {submitting ? (
+              <>
+                <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                <span>Enrolling Student...</span>
+              </>
+            ) : (
+              'Confirm Enrolment'
+            )}
           </button>
         </form>
       </Modal>
 
       {/* Modal Edit Student */}
-      <Modal isOpen={!!editingStudent} onClose={() => setEditingStudent(null)} title="Edit Student Profile">
+      <Modal isOpen={!!editingStudent} onClose={() => { setEditingStudent(null); setErrorMessage(null); }} title="Edit Student Profile">
         <form onSubmit={handleUpdateStudent} className="space-y-4 text-xs">
+          {errorMessage && (
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300 flex items-start gap-2 font-sub">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
           <div>
             <label className="block font-semibold text-slate-400 mb-1">USN (Immutable)</label>
             <input
@@ -461,16 +498,30 @@ export const AdminStudents: React.FC = () => {
 
           <button
             type="submit"
-            className="w-full mt-2 py-2.5 rounded-xl bg-white text-black font-bold text-xs hover:bg-zinc-200 transition-all font-sans"
+            disabled={submitting}
+            className="w-full mt-2 py-2.5 rounded-xl bg-white disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed text-black font-bold text-xs hover:bg-zinc-200 transition-all font-sans flex items-center justify-center gap-2"
           >
-            Save Changes
+            {submitting ? (
+              <>
+                <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                <span>Saving Changes...</span>
+              </>
+            ) : (
+              'Save Changes'
+            )}
           </button>
         </form>
       </Modal>
 
       {/* Delete Confirmation Modal */}
-      <Modal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Confirm Student Removal">
+      <Modal isOpen={!!deleteTarget} onClose={() => { setDeleteTarget(null); setErrorMessage(null); }} title="Confirm Student Removal">
         <div className="space-y-4">
+          {errorMessage && (
+            <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-xs text-rose-200 flex items-start gap-2.5 font-sub">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
           <div className="flex items-start gap-3 p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300">
             <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
             <div>
@@ -484,16 +535,25 @@ export const AdminStudents: React.FC = () => {
           </div>
           <div className="flex items-center justify-end gap-2 pt-2">
             <button
-              onClick={() => setDeleteTarget(null)}
-              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-white/10"
+              onClick={() => { setDeleteTarget(null); setErrorMessage(null); }}
+              disabled={deleting}
+              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-white/10 disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               onClick={handleDeleteStudent}
-              className="px-4 py-2 rounded-xl bg-rose-500 text-white font-bold text-xs hover:bg-rose-600"
+              disabled={deleting}
+              className="px-4 py-2 rounded-xl bg-rose-500 disabled:bg-rose-900 disabled:cursor-not-allowed text-white font-bold text-xs hover:bg-rose-600 flex items-center gap-2"
             >
-              Confirm Deletion
+              {deleting ? (
+                <>
+                  <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                  <span>Deleting...</span>
+                </>
+              ) : (
+                'Confirm Deletion'
+              )}
             </button>
           </div>
         </div>

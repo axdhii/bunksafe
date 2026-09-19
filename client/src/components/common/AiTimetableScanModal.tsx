@@ -11,6 +11,7 @@ import {
   MapPin,
   Users,
   RotateCcw,
+  Trash2,
 } from 'lucide-react';
 import { Modal } from './Modal';
 import { apiRequest } from '../../api/client';
@@ -145,6 +146,14 @@ export const AiTimetableScanModal: React.FC<AiTimetableScanModalProps> = ({
     } finally {
       setApplying(false);
     }
+  };
+
+  const handleDeleteSlot = (slotToDelete: ExtractedScheduleEntry) => {
+    if (!scanResult) return;
+    setScanResult({
+      ...scanResult,
+      schedule: scanResult.schedule.filter((s) => s !== slotToDelete),
+    });
   };
 
   const handleClose = () => {
@@ -297,56 +306,80 @@ export const AiTimetableScanModal: React.FC<AiTimetableScanModalProps> = ({
 
             {/* Schedule Slot Cards for Selected Day */}
             <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-              {scanResult.schedule
-                .filter((e) => e.dayOfWeek === activePreviewDay)
-                .map((slot, idx) => (
-                  <div
-                    key={idx}
-                    className="p-2.5 rounded-xl bg-zinc-950/80 border border-white/10 flex items-center justify-between gap-3 text-xs"
-                  >
-                    <div className="flex items-center gap-2 shrink-0 font-mono text-zinc-400 text-[11px]">
-                      <Clock className="w-3.5 h-3.5 text-zinc-500" />
-                      <span>{slot.startTime} - {slot.endTime}</span>
-                    </div>
+              {scanResult.schedule.filter((e) => e.dayOfWeek === activePreviewDay).length === 0 ? (
+                <div className="text-center py-6 text-zinc-500 font-sub text-xs">
+                  No classes scheduled for {DAY_NAMES[activePreviewDay]}
+                </div>
+              ) : (
+                scanResult.schedule
+                  .filter((e) => e.dayOfWeek === activePreviewDay)
+                  .sort((a, b) => {
+                    if (a.startTime !== b.startTime) return a.startTime.localeCompare(b.startTime);
+                    return (a.batch || '').localeCompare(b.batch || '');
+                  })
+                  .map((slot, idx) => (
+                    <div
+                      key={idx}
+                      className="p-2.5 rounded-xl bg-zinc-950/80 border border-white/10 flex items-center justify-between gap-3 text-xs group/card hover:border-white/20 transition-all"
+                    >
+                      <div className="flex items-center gap-2 shrink-0 font-mono text-zinc-400 text-[11px]">
+                        <Clock className="w-3.5 h-3.5 text-zinc-500" />
+                        <span>{slot.startTime} - {slot.endTime}</span>
+                      </div>
 
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        {slot.subjectCode ? (
-                          <span className="font-mono font-bold text-emerald-400 shrink-0">{slot.subjectCode}</span>
-                        ) : null}
-                        <span className="font-medium text-white truncate">
-                          {slot.subjectName || slot.title || 'Period'}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          {slot.subjectCode ? (
+                            <span className="font-mono font-bold text-emerald-400 shrink-0">{slot.subjectCode}</span>
+                          ) : null}
+                          <span className="font-medium text-white truncate">
+                            {slot.subjectName || slot.title || 'Period'}
+                          </span>
+                          {slot.type && (
+                            <span className="text-[9px] font-sub px-1.5 py-0.5 rounded bg-white/10 text-zinc-300 uppercase tracking-wider font-semibold">
+                              {slot.type}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 text-[11px] text-zinc-500 font-sub mt-0.5">
+                          {slot.faculty && (
+                            <span className="flex items-center gap-1">
+                              <Users className="w-3 h-3" />
+                              <span>{slot.faculty}</span>
+                            </span>
+                          )}
+                          {slot.room && (
+                            <span className="flex items-center gap-1">
+                              <MapPin className="w-3 h-3" />
+                              <span>{slot.room}</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span
+                          className={`text-[10px] font-mono px-2 py-0.5 rounded-md font-semibold ${
+                            slot.batch === 'ALL'
+                              ? 'bg-white/10 text-zinc-300'
+                              : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                          }`}
+                        >
+                          {slot.batch}
                         </span>
-                      </div>
-                      <div className="flex items-center gap-3 text-[11px] text-zinc-500 font-sub mt-0.5">
-                        {slot.faculty && (
-                          <span className="flex items-center gap-1">
-                            <Users className="w-3 h-3" />
-                            <span>{slot.faculty}</span>
-                          </span>
-                        )}
-                        {slot.room && (
-                          <span className="flex items-center gap-1">
-                            <MapPin className="w-3 h-3" />
-                            <span>{slot.room}</span>
-                          </span>
-                        )}
-                      </div>
-                    </div>
 
-                    <div className="shrink-0">
-                      <span
-                        className={`text-[10px] font-mono px-2 py-0.5 rounded-md font-semibold ${
-                          slot.batch === 'ALL'
-                            ? 'bg-white/10 text-zinc-300'
-                            : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                        }`}
-                      >
-                        {slot.batch}
-                      </span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSlot(slot)}
+                          className="p-1 rounded-md text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                          title="Remove slot"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+              )}
             </div>
 
             {/* Confirm and Apply Button */}
@@ -363,10 +396,11 @@ export const AiTimetableScanModal: React.FC<AiTimetableScanModalProps> = ({
                 type="button"
                 disabled={applying}
                 onClick={handleConfirmAndApply}
-                className="py-3 px-6 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:bg-zinc-800 disabled:text-zinc-500 text-black font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg"
+                className="py-3 px-6 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:bg-zinc-800 disabled:text-zinc-500 text-black font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg disabled:cursor-not-allowed"
               >
+                {applying && <Sparkles className="w-4 h-4 animate-spin text-black" />}
                 <span>{applying ? 'Applying to Timetable...' : 'Approve & Save Timetable'}</span>
-                <ArrowRight className="w-4 h-4" />
+                {!applying && <ArrowRight className="w-4 h-4" />}
               </button>
             </div>
           </div>

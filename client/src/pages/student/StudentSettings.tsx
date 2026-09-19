@@ -67,20 +67,24 @@ export const StudentSettings: React.FC = () => {
     setPushStatus(permission);
     if (permission === 'granted') {
       try {
-        // Register mock/real subscription with backend
-        await apiRequest('/notifications/subscribe', {
-          method: 'POST',
-          data: {
-            endpoint: `https://fcm.googleapis.com/fcm/send/mock_${Date.now()}`,
-            keys: {
-              p256dh: 'mock_p256dh_key_data',
-              auth: 'mock_auth_key_data',
-            },
-          },
-        });
-        alert('Push notifications activated successfully!');
+        if ('serviceWorker' in navigator) {
+          const reg = await navigator.serviceWorker.ready;
+          if (reg && 'pushManager' in reg) {
+            const sub = await reg.pushManager.getSubscription();
+            if (sub) {
+              await apiRequest('/notifications/subscribe', {
+                method: 'POST',
+                data: sub.toJSON(),
+              });
+              alert('Push notifications activated successfully!');
+              return;
+            }
+          }
+        }
+        alert('Notification permission granted!');
       } catch (err) {
-        console.warn('Subscription registered locally.');
+        console.warn('Subscription registered locally:', err);
+        alert('Notification permission granted!');
       }
     }
   };
@@ -320,9 +324,10 @@ export const StudentSettings: React.FC = () => {
           <button
             onClick={handleSavePreferences}
             disabled={saving}
-            className="px-6 py-2.5 rounded-xl bg-white text-black font-semibold text-xs hover:bg-zinc-200 active:scale-95 transition-all shadow-md"
+            className="px-6 py-2.5 rounded-xl bg-white text-black font-semibold text-xs hover:bg-zinc-200 active:scale-95 transition-all shadow-md flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {saving ? 'Saving...' : 'Save Settings'}
+            {saving && <Sparkles className="w-3.5 h-3.5 animate-spin text-black" />}
+            <span>{saving ? 'Saving...' : 'Save Settings'}</span>
           </button>
         </div>
       </div>

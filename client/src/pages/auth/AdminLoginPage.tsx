@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Shield, ArrowRight, AlertCircle, Lock } from 'lucide-react';
+import { Shield, ArrowRight, AlertCircle, Lock, Sparkles } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 
 export const AdminLoginPage: React.FC = () => {
@@ -89,10 +89,19 @@ export const AdminLoginPage: React.FC = () => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full mt-2 py-3 rounded-xl bg-white text-black font-bold text-sm shadow-lg hover:bg-zinc-200 active:scale-[0.98] transition-all flex items-center justify-center gap-2 font-sans"
+              className="w-full mt-2 py-3 rounded-xl bg-white disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed text-black font-bold text-sm shadow-lg hover:bg-zinc-200 active:scale-[0.98] transition-all flex items-center justify-center gap-2 font-sans"
             >
-              <span>{loading ? 'Authenticating...' : 'Enter Admin Console'}</span>
-              <ArrowRight className="w-4 h-4" />
+              {loading ? (
+                <>
+                  <Sparkles className="w-4 h-4 animate-spin text-zinc-400" />
+                  <span>Authenticating...</span>
+                </>
+              ) : (
+                <>
+                  <span>Enter Admin Console</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
             </button>
           </form>
         </div>

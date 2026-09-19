@@ -5,6 +5,7 @@ import { ThemeProvider } from './hooks/useTheme';
 
 import { Navbar } from './components/common/Navbar';
 import { FloatingDock } from './components/common/FloatingDock';
+import { AdminSubNav } from './components/common/AdminSubNav';
 import { InstallPromptModal } from './components/common/InstallPromptModal';
 import { OfflineBanner } from './components/common/OfflineBanner';
 
@@ -73,6 +74,7 @@ const AdminLayout: React.FC = () => {
   return (
     <div className="min-h-screen flex flex-col bg-black text-zinc-100 transition-colors">
       <Navbar />
+      <AdminSubNav />
       <main className="flex-1">
         <React.Suspense fallback={<PageLoader />}>
           <Outlet />

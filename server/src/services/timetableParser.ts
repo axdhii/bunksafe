@@ -102,11 +102,11 @@ export function parseTimetableBuffer(
   jsonData.forEach((row, index) => {
     const rowNumber = index + 2; // header is row 1
 
-    // Find keys case-insensitively
+    // Find keys case-insensitively and guard against prototype pollution
     const keys = Object.keys(row);
     const findVal = (pattern: RegExp) => {
-      const k = keys.find((key) => pattern.test(key));
-      return k ? String(row[k]).trim() : '';
+      const k = keys.find((key) => key !== '__proto__' && key !== 'constructor' && key !== 'prototype' && pattern.test(key));
+      return k && Object.prototype.hasOwnProperty.call(row, k) ? String(row[k]).trim() : '';
     };
 
     const dayRaw = findVal(/day/i);

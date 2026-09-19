@@ -18,6 +18,7 @@ import {
   Utensils,
   Layers,
   Filter,
+  CalendarCheck,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import confetti from 'canvas-confetti';
@@ -29,7 +30,6 @@ import { Modal } from '../../components/common/Modal';
 import { useOfflineSync } from '../../hooks/useOfflineSync';
 import { calculateAttendance } from '../../utils/attendanceMath';
 import { SpotlightCard } from '../../components/common/SpotlightCard';
-import { TextGenerateEffect } from '../../components/common/TextGenerateEffect';
 
 export const StudentDashboard: React.FC = () => {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -217,7 +217,7 @@ export const StudentDashboard: React.FC = () => {
             <span>BunkSafe Attendance Engine</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white font-sans">
-            Hello, {data.student.name.split(' ')[0]} 👋
+            Welcome back, {data.student.name.split(' ')[0]}
           </h1>
           <p className="text-xs sm:text-sm text-zinc-400 mt-0.5 font-sub font-light">
             Section {data.student.section.name} • {data.student.branch.code} Sem {data.student.semester.number} • {data.student.usn}
@@ -294,16 +294,17 @@ export const StudentDashboard: React.FC = () => {
                 <div className="text-4xl font-bold text-white font-sans tracking-tight">
                   {data.overall.safeSkips}
                 </div>
-                <div className="text-xs sm:text-sm text-zinc-300 mt-1 font-sub font-light">
-                  <TextGenerateEffect
-                    words={
-                      data.overall.safeSkips > 0
-                        ? `You have a safety buffer of ${data.overall.safeSkips} skips across your courses.`
-                        : `No safe skips available. Attending upcoming lectures is mandatory.`
-                    }
-                    highlightWords={[`${data.overall.safeSkips}`, 'mandatory']}
-                  />
-                </div>
+                <p className="text-xs sm:text-sm text-zinc-300 mt-1 font-sub font-light leading-relaxed">
+                  {data.overall.safeSkips > 0 ? (
+                    <>
+                      Safety buffer of <span className="text-white font-sans font-bold">{data.overall.safeSkips} skips</span> across enrolled courses.
+                    </>
+                  ) : (
+                    <>
+                      No safe skips available. Attending upcoming lectures is <span className="text-amber-400 font-sans font-bold">mandatory</span>.
+                    </>
+                  )}
+                </p>
               </div>
             </div>
 
@@ -333,16 +334,17 @@ export const StudentDashboard: React.FC = () => {
                 <div className="text-4xl font-bold text-white font-sans tracking-tight">
                   {data.overall.recoveryRequired}
                 </div>
-                <div className="text-xs sm:text-sm text-zinc-300 mt-1 font-sub font-light">
-                  <TextGenerateEffect
-                    words={
-                      data.overall.recoveryRequired > 0
-                        ? `Consecutive classes required to climb back to ${data.threshold}%.`
-                        : `No recovery needed! You are comfortably above the cutoff.`
-                    }
-                    highlightWords={[`${data.threshold}%`, 'comfortably']}
-                  />
-                </div>
+                <p className="text-xs sm:text-sm text-zinc-300 mt-1 font-sub font-light leading-relaxed">
+                  {data.overall.recoveryRequired > 0 ? (
+                    <>
+                      <span className="text-rose-400 font-sans font-bold">{data.overall.recoveryRequired} consecutive classes</span> required to climb back to {data.threshold}%.
+                    </>
+                  ) : (
+                    <>
+                      No recovery deficit. You are <span className="text-emerald-400 font-sans font-bold">comfortably above</span> the statutory cutoff.
+                    </>
+                  )}
+                </p>
               </div>
             </div>
 
@@ -391,9 +393,9 @@ export const StudentDashboard: React.FC = () => {
             <div className="flex items-center p-1 rounded-2xl liquid-glass border border-white/10 text-xs">
               <button
                 onClick={() => setActiveBatchFilter('B1')}
-                className={`px-3 py-1 rounded-xl text-xs transition-all ${
+                className={`px-3 py-1 rounded-xl text-xs transition-all active:scale-95 ${
                   activeBatchFilter === 'B1'
-                    ? 'bg-white text-black font-bold'
+                    ? 'bg-white text-black font-bold shadow-sm'
                     : 'text-zinc-400 hover:text-white font-sub'
                 }`}
               >
@@ -401,9 +403,9 @@ export const StudentDashboard: React.FC = () => {
               </button>
               <button
                 onClick={() => setActiveBatchFilter('B2')}
-                className={`px-3 py-1 rounded-xl text-xs transition-all ${
+                className={`px-3 py-1 rounded-xl text-xs transition-all active:scale-95 ${
                   activeBatchFilter === 'B2'
-                    ? 'bg-white text-black font-bold'
+                    ? 'bg-white text-black font-bold shadow-sm'
                     : 'text-zinc-400 hover:text-white font-sub'
                 }`}
               >
@@ -411,9 +413,9 @@ export const StudentDashboard: React.FC = () => {
               </button>
               <button
                 onClick={() => setActiveBatchFilter('ALL')}
-                className={`px-2.5 py-1 rounded-xl text-xs transition-all ${
+                className={`px-3 py-1 rounded-xl text-xs transition-all active:scale-95 ${
                   activeBatchFilter === 'ALL'
-                    ? 'bg-white/15 text-white font-medium'
+                    ? 'bg-white text-black font-bold shadow-sm'
                     : 'text-zinc-400 hover:text-white font-sub'
                 }`}
               >
@@ -434,9 +436,11 @@ export const StudentDashboard: React.FC = () => {
         </div>
 
         {filteredTodayClasses.length === 0 ? (
-          <div className="p-8 rounded-3xl liquid-glass-card text-center space-y-2">
-            <span className="text-3xl">🎉</span>
-            <h4 className="text-base font-bold text-white font-sans">No classes scheduled today!</h4>
+          <div className="p-8 rounded-3xl liquid-glass-card border border-white/10 text-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-white/[0.04] border border-white/10 flex items-center justify-center mx-auto text-emerald-400">
+              <CalendarCheck className="w-6 h-6" />
+            </div>
+            <h4 className="text-base font-bold text-white font-sans">No classes scheduled today</h4>
             <p className="text-xs text-zinc-400 max-w-sm mx-auto font-sub font-light">
               Enjoy your day off or review your weekly schedule in the Timetable tab.
             </p>
@@ -552,26 +556,34 @@ export const StudentDashboard: React.FC = () => {
                     <button
                       onClick={() => handleMarkClass(item, 'PRESENT')}
                       disabled={isMarking === item.id}
-                      className={`py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                      className={`py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
                         item.status === 'PRESENT'
                           ? 'bg-white text-black font-sans shadow-sm'
                           : 'bg-white/[0.05] hover:bg-white/10 text-zinc-300 hover:text-white border border-white/5 hover:border-white/20 font-sub'
                       }`}
                     >
-                      <CheckCircle2 className="w-4 h-4" />
+                      {isMarking === item.id ? (
+                        <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="w-4 h-4" />
+                      )}
                       <span>{item.status === 'PRESENT' ? 'Present ✓' : 'Mark Present'}</span>
                     </button>
 
                     <button
                       onClick={() => handleMarkClass(item, 'ABSENT')}
                       disabled={isMarking === item.id}
-                      className={`py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                      className={`py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
                         item.status === 'ABSENT'
                           ? 'bg-rose-500 text-white font-sans'
                           : 'bg-white/[0.05] hover:bg-rose-500/20 text-zinc-300 hover:text-rose-400 border border-white/5 hover:border-rose-500/30 font-sub'
                       }`}
                     >
-                      <XCircle className="w-4 h-4" />
+                      {isMarking === item.id ? (
+                        <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <XCircle className="w-4 h-4" />
+                      )}
                       <span>{item.status === 'ABSENT' ? 'Absent ✕' : 'Mark Absent'}</span>
                     </button>
                   </div>
@@ -598,9 +610,10 @@ export const StudentDashboard: React.FC = () => {
             <button
               onClick={handleMarkAllPresent}
               disabled={markAllLoading}
-              className="px-4 py-2 rounded-xl bg-white text-black font-bold text-xs hover:bg-zinc-200 transition-all font-sans"
+              className="px-4 py-2 rounded-xl bg-white text-black font-bold text-xs hover:bg-zinc-200 transition-all font-sans flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {markAllLoading ? 'Marking All...' : 'Confirm Present'}
+              {markAllLoading && <Sparkles className="w-3.5 h-3.5 animate-spin text-black" />}
+              <span>{markAllLoading ? 'Marking All...' : 'Confirm Present'}</span>
             </button>
           </div>
         </div>

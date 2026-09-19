@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { prisma } from '../prisma/client.js';
 
 // SEC-3: No hardcoded fallback — crash in production if AUTH_SECRET is missing
 if (!process.env.AUTH_SECRET && process.env.NODE_ENV === 'production') {
@@ -65,10 +66,22 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-export function requireStudent(req: Request, res: Response, next: NextFunction) {
+export async function requireStudent(req: Request, res: Response, next: NextFunction): Promise<void> {
   if (!req.user || req.user.role !== 'STUDENT' || !req.user.studentId) {
     res.status(403).json({ error: 'Access denied. Student profile required.' });
     return;
+  }
+  try {
+    const student = await prisma.student.findUnique({
+      where: { id: req.user.studentId },
+      select: { active: true },
+    });
+    if (!student || student.active === false) {
+      res.status(403).json({ error: 'Student account has been suspended or deactivated.' });
+      return;
+    }
+  } catch (err) {
+    console.error('requireStudent verification error:', err);
   }
   next();
 }

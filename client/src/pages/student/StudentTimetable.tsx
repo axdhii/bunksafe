@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, MapPin, User as UserIcon, Calendar as CalendarIcon, Sparkles } from 'lucide-react';
+import { Clock, MapPin, User as UserIcon, Calendar as CalendarIcon, Sparkles, Coffee, Utensils } from 'lucide-react';
 import { apiRequest } from '../../api/client';
 import { PageHeader } from '../../components/common/PageHeader';
 
@@ -11,12 +11,14 @@ interface TimetableEntry {
   type: string;
   faculty?: string;
   room?: string;
-  subject: {
+  isBreak?: boolean;
+  title?: string;
+  subject?: {
     id: string;
     code: string;
     name: string;
     credits: number;
-  };
+  } | null;
 }
 
 const DAYS = [
@@ -137,53 +139,94 @@ export const StudentTimetable: React.FC = () => {
             </div>
           ) : (
             <div className="space-y-3">
-              {dayEntries.map((item, idx) => (
-                <div
-                  key={item.id}
-                  className="p-4 sm:p-5 rounded-2xl liquid-glass-card border border-white/[0.08] hover:border-white/20 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                >
-                  <div className="flex items-start gap-4">
-                    {/* Time block */}
-                    <div className="p-3 rounded-2xl bg-white/[0.04] border border-white/10 text-center min-w-[90px] shrink-0 font-sub">
-                      <div className="text-xs font-bold text-white font-sans">{item.startTime}</div>
-                      <div className="text-[10px] text-zinc-500 my-0.5">to</div>
-                      <div className="text-xs font-bold text-zinc-300">{item.endTime}</div>
+              {dayEntries.map((item, idx) => {
+                const isBreak = item.isBreak || ['INTERVAL', 'LUNCH', 'BREAK'].includes(item.type?.toUpperCase()) || !item.subject;
+                const isLunch = item.type?.toUpperCase() === 'LUNCH';
+
+                if (isBreak) {
+                  return (
+                    <div
+                      key={item.id}
+                      className={`p-4 sm:p-5 rounded-2xl border transition-all flex items-center justify-between gap-4 ${
+                        isLunch
+                          ? 'bg-amber-500/10 border-amber-500/25 text-amber-300'
+                          : 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="p-3 rounded-2xl bg-white/[0.04] border border-white/10 text-center min-w-[90px] shrink-0 font-sub">
+                          <div className="text-xs font-bold text-white font-sans">{item.startTime}</div>
+                          <div className="text-[10px] text-zinc-500 my-0.5">to</div>
+                          <div className="text-xs font-bold text-zinc-300">{item.endTime}</div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10">
+                            {isLunch ? <Utensils className="w-5 h-5 text-amber-400" /> : <Coffee className="w-5 h-5 text-emerald-400" />}
+                          </div>
+                          <div>
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-white/10 uppercase tracking-wider font-bold">
+                              {item.type || 'BREAK'}
+                            </span>
+                            <h4 className="text-base font-bold text-white mt-1 font-sans">
+                              {item.title || (isLunch ? 'Lunch Break' : 'Interval / Short Break')}
+                            </h4>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div
+                    key={item.id}
+                    className="p-4 sm:p-5 rounded-2xl liquid-glass-card border border-white/[0.08] hover:border-white/20 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  >
+                    <div className="flex items-start gap-4">
+                      {/* Time block */}
+                      <div className="p-3 rounded-2xl bg-white/[0.04] border border-white/10 text-center min-w-[90px] shrink-0 font-sub">
+                        <div className="text-xs font-bold text-white font-sans">{item.startTime}</div>
+                        <div className="text-[10px] text-zinc-500 my-0.5">to</div>
+                        <div className="text-xs font-bold text-zinc-300">{item.endTime}</div>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-sans text-xs font-bold text-white">
+                            {item.subject?.code || 'N/A'}
+                          </span>
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-white/10 text-zinc-300 font-sub uppercase font-medium">
+                            {item.type}
+                          </span>
+                          {item.subject?.credits !== undefined && (
+                            <span className="text-[10px] text-zinc-400 font-sub font-light">
+                              {item.subject.credits} Credits
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="text-base font-bold text-white mt-1 font-sans">
+                          {item.subject?.name || 'Class'}
+                        </h4>
+                      </div>
                     </div>
 
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-sans text-xs font-bold text-white">
-                          {item.subject.code}
-                        </span>
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-white/10 text-zinc-300 font-sub uppercase font-medium">
-                          {item.type}
-                        </span>
-                        <span className="text-[10px] text-zinc-400 font-sub font-light">
-                          {item.subject.credits} Credits
-                        </span>
-                      </div>
-                      <h4 className="text-base font-bold text-white mt-1 font-sans">
-                        {item.subject.name}
-                      </h4>
+                    <div className="flex flex-wrap items-center gap-4 text-xs text-zinc-400 sm:text-right border-t sm:border-t-0 pt-2 sm:pt-0 border-white/5 font-sub font-light">
+                      {item.room && (
+                        <div className="flex items-center gap-1.5">
+                          <MapPin className="w-4 h-4 text-zinc-400" />
+                          <span className="text-zinc-300 font-medium">{item.room}</span>
+                        </div>
+                      )}
+                      {item.faculty && (
+                        <div className="flex items-center gap-1.5">
+                          <UserIcon className="w-4 h-4 text-zinc-400" />
+                          <span className="text-zinc-300 font-medium">{item.faculty}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
-
-                  <div className="flex flex-wrap items-center gap-4 text-xs text-zinc-400 sm:text-right border-t sm:border-t-0 pt-2 sm:pt-0 border-white/5 font-sub font-light">
-                    {item.room && (
-                      <div className="flex items-center gap-1.5">
-                        <MapPin className="w-4 h-4 text-zinc-400" />
-                        <span className="text-zinc-300 font-medium">{item.room}</span>
-                      </div>
-                    )}
-                    {item.faculty && (
-                      <div className="flex items-center gap-1.5">
-                        <UserIcon className="w-4 h-4 text-zinc-400" />
-                        <span className="text-zinc-300 font-medium">{item.faculty}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -206,16 +249,23 @@ export const StudentTimetable: React.FC = () => {
                   <p className="text-xs text-zinc-500 py-3 text-center font-sub">No classes</p>
                 ) : (
                   <div className="space-y-2">
-                    {dayList.map((c) => (
-                      <div key={c.id} className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5 text-xs space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="font-sans font-bold text-white">{c.subject.code}</span>
-                          <span className="font-sub text-zinc-400 text-[11px]">{c.startTime} - {c.endTime}</span>
+                    {dayList.map((c) => {
+                      const isBreak = c.isBreak || ['INTERVAL', 'LUNCH', 'BREAK'].includes(c.type?.toUpperCase()) || !c.subject;
+                      return (
+                        <div key={c.id} className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5 text-xs space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-sans font-bold text-white">
+                              {isBreak ? (c.type || 'BREAK') : (c.subject?.code || 'N/A')}
+                            </span>
+                            <span className="font-sub text-zinc-400 text-[11px]">{c.startTime} - {c.endTime}</span>
+                          </div>
+                          <div className="font-medium text-zinc-200 truncate font-sans">
+                            {isBreak ? (c.title || (c.type === 'LUNCH' ? 'Lunch Break' : 'Interval / Break')) : (c.subject?.name || 'Class')}
+                          </div>
+                          {c.room && <div className="text-[11px] text-zinc-400 font-sub">Room: {c.room}</div>}
                         </div>
-                        <div className="font-medium text-zinc-200 truncate font-sans">{c.subject.name}</div>
-                        {c.room && <div className="text-[11px] text-zinc-400 font-sub">Room: {c.room}</div>}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
