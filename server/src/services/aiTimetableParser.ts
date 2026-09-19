@@ -51,10 +51,21 @@ export async function parseTimetableImageWithGemini(
   const base64Data = imageBuffer.toString('base64');
 
   const prompt = `You are a high-precision college timetable parsing engine.
-Analyze this official engineering college timetable document.
+Analyze this official engineering college timetable document and extract the complete weekly schedule.
 
 CRITICAL PARSING RULES:
-1. LEGEND / SUBJECT TABLE:
+1. COMPLETE ALL DAYS (DO NOT STOP EARLY):
+   - You MUST extract the schedule for EVERY day row shown in the table:
+     * Monday (dayOfWeek: 1)
+     * Tuesday (dayOfWeek: 2)
+     * Wednesday (dayOfWeek: 3)
+     * Thursday (dayOfWeek: 4)
+     * Friday (dayOfWeek: 5)
+     * Saturday (dayOfWeek: 6, if classes/activities are listed)
+   - DO NOT STOP after Monday or Tuesday! Every single row from Monday to Friday MUST be completely parsed.
+   - Expect 20 to 30 total schedule entries for a full college week.
+
+2. LEGEND / SUBJECT TABLE:
    - Carefully inspect the bottom/side subject list or legend.
    - For every course, extract:
      * code: Official subject code (e.g. "BCS501", "BCS502", "BCS503", "BAIL504", "BCS515C", "BCI586", "BRMK557", "BCS508")
@@ -63,7 +74,7 @@ CRITICAL PARSING RULES:
      * type: "LECTURE" | "LAB" | "TUTORIAL" | "OTHER"
      * credits: Number (default 4 for theory, 2 for labs if not stated)
 
-2. SCHEDULE GRID:
+3. SCHEDULE GRID:
    - Days: Monday=1, Tuesday=2, Wednesday=3, Thursday=4, Friday=5, Saturday=6.
    - Times: Normalize all times to 24-hour "HH:MM" format (e.g. 09:00, 09:55, 10:50, 11:10, 12:05, 13:00, 14:00, 14:55, 15:05, 16:00, 16:55).
    - Resolve Abbreviations: Every timetable cell containing a course abbreviation MUST be resolved to its official subjectCode from the legend.
@@ -74,7 +85,7 @@ CRITICAL PARSING RULES:
        2) batch="A2", subjectCode="BCS502", room="CN labA--323", faculty="AM", type="LAB"
    - For regular whole-class lectures, set batch="ALL".
    - Classroom: Use the default classroom from the header (e.g. "A-405") unless the cell or header specifies a specialized lab room.
-   - Ignore or label pure breaks as title="Break" or title="Lunch Break" with type="INTERVAL".
+   - Exclude lunch breaks and tea breaks, or mark them with type="INTERVAL".
 
 OUTPUT FORMAT:
 Return strictly valid JSON matching this structure:
@@ -127,6 +138,7 @@ Return strictly valid JSON matching this structure:
     generationConfig: {
       responseMimeType: 'application/json',
       temperature: 0.1,
+      maxOutputTokens: 8192,
     },
   };
 
@@ -171,7 +183,8 @@ Return strictly valid JSON matching this structure:
       const rawEntries = parsed.schedule || parsed.entries || [];
       const schedule: ExtractedScheduleEntry[] = rawEntries.map((e: any) => {
         let dayNum = Number(e.dayOfWeek);
-        if (isNaN(dayNum) && e.day) {
+        if (isNaN(dayNum) || dayNum < 1 || dayNum > 7) {
+          const rawDay = String(e.dayOfWeek || e.day || '').toLowerCase();
           const daysMap: Record<string, number> = {
             mon: 1, monday: 1,
             tue: 2, tuesday: 2,
@@ -181,7 +194,12 @@ Return strictly valid JSON matching this structure:
             sat: 6, saturday: 6,
             sun: 7, sunday: 7,
           };
-          dayNum = daysMap[String(e.day).toLowerCase()] || 1;
+          for (const [k, v] of Object.entries(daysMap)) {
+            if (rawDay.includes(k)) {
+              dayNum = v;
+              break;
+            }
+          }
         }
 
         return {
@@ -197,6 +215,15 @@ Return strictly valid JSON matching this structure:
           title: e.title ? String(e.title).trim() : undefined,
         };
       });
+
+      // Completeness Gate: If a model extracted fewer than 15 entries or fewer than 4 distinct days,
+      // it prematurely stopped. Reject and try next fallback model if available.
+      const uniqueDays = new Set(schedule.map((s) => s.dayOfWeek));
+      if (schedule.length < 15 && uniqueDays.size < 4 && model !== FALLBACK_MODELS[FALLBACK_MODELS.length - 1]) {
+        console.warn(`[AI Scanner] Model ${model} returned partial schedule (${schedule.length} entries, ${uniqueDays.size} days). Trying fallback...`);
+        lastError = new Error(`Model ${model} returned incomplete schedule (${schedule.length} entries, ${uniqueDays.size} days).`);
+        continue;
+      }
 
       return {
         metadata: parsed.metadata || {},
