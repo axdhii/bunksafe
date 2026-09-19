@@ -10,10 +10,12 @@ interface AuthContextType {
   isLoading: boolean;
   loginStudent: (
     usn: string,
-    semesterNumber?: number,
-    branchCode?: string,
-    sectionName?: string,
-    password?: string
+    password?: string,
+    cohort?: {
+      semesterNumber?: number;
+      branchCode?: string;
+      sectionName?: string;
+    }
   ) => Promise<void>;
   activateStudent: (usn: string, email: string, password: string) => Promise<void>;
   loginAdmin: (email: string, password: string) => Promise<void>;
@@ -73,14 +75,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loginStudent = async (
     usn: string,
-    semesterNumber?: number,
-    branchCode?: string,
-    sectionName?: string,
-    password?: string
+    password?: string,
+    cohort?: {
+      semesterNumber?: number;
+      branchCode?: string;
+      sectionName?: string;
+    }
   ) => {
+    const payload: any = { usn: usn.trim().toUpperCase(), password };
+    if (cohort?.semesterNumber) payload.semesterNumber = cohort.semesterNumber;
+    if (cohort?.branchCode) payload.branchCode = cohort.branchCode;
+    if (cohort?.sectionName) payload.sectionName = cohort.sectionName;
+
     const data = await apiRequest('/auth/student/login', {
       method: 'POST',
-      data: { usn, semesterNumber, branchCode, sectionName, password },
+      data: payload,
     });
     if (data.token) {
       localStorage.setItem('aurora_token', data.token);

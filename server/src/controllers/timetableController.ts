@@ -492,3 +492,40 @@ export async function aiConfirmTimetable(req: Request, res: Response): Promise<v
     res.status(500).json({ error: error.message || 'Failed to save scanned timetable.' });
   }
 }
+
+export async function clearSectionTimetable(req: Request, res: Response): Promise<void> {
+  try {
+    const { sectionId, semesterId, branchId } = (req.method === 'POST' ? req.body : req.query) as any;
+
+    const where: any = {};
+    if (sectionId) where.sectionId = String(sectionId);
+    if (semesterId) where.semesterId = String(semesterId);
+    if (branchId) where.branchId = String(branchId);
+
+    const timetables = await prisma.timetable.findMany({ where });
+    const timetableIds = timetables.map((t) => t.id);
+
+    if (timetableIds.length > 0) {
+      await prisma.timetableEntry.deleteMany({
+        where: { timetableId: { in: timetableIds } },
+      });
+      await prisma.timetable.deleteMany({
+        where: { id: { in: timetableIds } },
+      });
+    }
+
+    await logAuditAction({
+      actorEmail: req.user?.email || 'admin',
+      actorRole: req.user?.role || 'ADMIN',
+      action: 'TIMETABLE_CLEARED',
+      targetEntity: 'Timetable',
+      details: { sectionId, semesterId, branchId, deletedTimetableCount: timetableIds.length },
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, message: 'Timetable cleared successfully.' });
+  } catch (error: any) {
+    console.error('clearSectionTimetable error:', error);
+    res.status(500).json({ error: 'Failed to clear timetable.' });
+  }
+}

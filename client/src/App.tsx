@@ -117,6 +117,7 @@ export const App: React.FC = () => {
             {/* Student Protected Routes */}
             <Route path="/" element={<StudentLayout />}>
               <Route index element={<StudentDashboard />} />
+              <Route path="dashboard" element={<Navigate to="/" replace />} />
               <Route path="timetable" element={<StudentTimetable />} />
               <Route path="subjects" element={<StudentSubjects />} />
               <Route path="history" element={<StudentHistory />} />

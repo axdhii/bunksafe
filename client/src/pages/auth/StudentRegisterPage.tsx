@@ -178,6 +178,9 @@ export const StudentRegisterPage: React.FC = () => {
           semesterId,
           branchId,
           sectionId,
+          semesterNumber: selectedSem?.number,
+          branchCode: selectedBranch?.code,
+          sectionName: selectedSec?.name,
         },
       });
 
@@ -602,8 +605,8 @@ export const StudentRegisterPage: React.FC = () => {
       {registeredStudent && (
         <RegistrationScanModal
           isOpen={!!registeredStudent}
-          onClose={() => navigate('/dashboard')}
-          onProceed={() => navigate('/dashboard')}
+          onClose={() => navigate('/')}
+          onProceed={() => navigate('/')}
           student={registeredStudent}
         />
       )}

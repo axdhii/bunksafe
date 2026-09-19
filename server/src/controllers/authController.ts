@@ -4,6 +4,13 @@ import { prisma } from '../prisma/client.js';
 import { generateToken } from '../middleware/auth.js';
 import { logAuditAction } from '../services/auditService.js';
 
+const getAuthCookieOptions = () => ({
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: (process.env.NODE_ENV === 'production' ? 'none' : 'lax') as 'none' | 'lax',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+});
+
 export async function registerStudent(req: Request, res: Response): Promise<void> {
   try {
     const { name, usn, phone, email, password, semesterId, branchId, sectionId, semesterNumber, branchCode, sectionName } = req.body;
@@ -87,12 +94,7 @@ export async function registerStudent(req: Request, res: Response): Promise<void
         sectionId: claimedStudent.sectionId,
       });
 
-      res.cookie('token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-      });
+      res.cookie('token', token, getAuthCookieOptions());
 
       await logAuditAction({
         actorEmail: claimedStudent.email || claimedStudent.usn,
@@ -118,39 +120,60 @@ export async function registerStudent(req: Request, res: Response): Promise<void
       return;
     }
 
-    // Resolve semester, branch, and section
-    let semId = semesterId;
-    let bId = branchId;
-    let secId = sectionId;
+    // Resolve semester, branch, and section defensively
+    let sem: any = null;
+    if (semesterId) {
+      sem = await prisma.semester.findUnique({ where: { id: String(semesterId) } }).catch(() => null);
+    }
+    if (!sem && semesterNumber) {
+      sem = await prisma.semester.findFirst({ where: { number: Number(semesterNumber) } });
+    }
+    if (!sem) {
+      sem = await prisma.semester.findFirst({ orderBy: { number: 'asc' } });
+    }
+    const semId = sem?.id;
 
-    if (!semId && semesterNumber) {
-      const sem = await prisma.semester.findFirst({ where: { number: Number(semesterNumber) } });
-      if (sem) semId = sem.id;
+    let br: any = null;
+    if (branchId) {
+      br = await prisma.branch.findUnique({ where: { id: String(branchId) } }).catch(() => null);
     }
-    if (!bId && branchCode) {
-      const br = await prisma.branch.findFirst({ where: { code: String(branchCode).trim().toUpperCase() } });
-      if (br) bId = br.id;
+    if (!br && branchCode) {
+      br = await prisma.branch.findFirst({ where: { code: String(branchCode).trim().toUpperCase() } });
     }
-    if (!secId && sectionName && semId && bId) {
-      const sec = await prisma.section.findFirst({
-        where: { name: String(sectionName).trim().toUpperCase(), semesterId: semId, branchId: bId },
+    if (!br) {
+      br = await prisma.branch.findFirst({ orderBy: { code: 'asc' } });
+    }
+    const bId = br?.id;
+
+    let sec: any = null;
+    if (sectionId && semId && bId) {
+      sec = await prisma.section.findUnique({ where: { id: String(sectionId) } }).catch(() => null);
+      if (sec && (sec.semesterId !== semId || sec.branchId !== bId)) {
+        sec = null;
+      }
+    }
+    if (!sec && semId && bId) {
+      const secName = sectionName ? String(sectionName).trim().toUpperCase() : 'A';
+      sec = await prisma.section.findFirst({
+        where: { name: secName, semesterId: semId, branchId: bId },
       });
-      if (sec) secId = sec.id;
+      if (!sec) {
+        try {
+          sec = await prisma.section.create({
+            data: {
+              name: secName,
+              semesterId: semId,
+              branchId: bId,
+            },
+          });
+        } catch {
+          sec = await prisma.section.findFirst({
+            where: { semesterId: semId, branchId: bId },
+          });
+        }
+      }
     }
-
-    // Fallbacks to default database records if still unassigned
-    if (!semId) {
-      const defaultSem = await prisma.semester.findFirst({ orderBy: { number: 'asc' } });
-      semId = defaultSem?.id || '';
-    }
-    if (!bId) {
-      const defaultBranch = await prisma.branch.findFirst({ orderBy: { code: 'asc' } });
-      bId = defaultBranch?.id || '';
-    }
-    if (!secId) {
-      const defaultSec = await prisma.section.findFirst({ where: { semesterId: semId, branchId: bId } });
-      secId = defaultSec?.id || '';
-    }
+    const secId = sec?.id;
 
     if (!semId || !bId || !secId) {
       res.status(400).json({ error: 'Invalid academic assignment. Please select valid Semester, Branch, and Section.' });
@@ -202,12 +225,7 @@ export async function registerStudent(req: Request, res: Response): Promise<void
       sectionId: student.sectionId,
     });
 
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    res.cookie('token', token, getAuthCookieOptions());
 
     await logAuditAction({
       actorEmail: student.email || student.usn,
@@ -314,12 +332,7 @@ export async function activateStudent(req: Request, res: Response): Promise<void
       sectionId: updatedStudent.sectionId,
     });
 
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    res.cookie('token', token, getAuthCookieOptions());
 
     await logAuditAction({
       actorEmail: updatedStudent.email || updatedStudent.usn,
@@ -362,7 +375,7 @@ export async function activateStudent(req: Request, res: Response): Promise<void
 
 export async function studentLogin(req: Request, res: Response): Promise<void> {
   try {
-    const { usn, password, semesterNumber, branchCode, sectionName } = req.body;
+    const { usn, password } = req.body;
 
     if (!usn) {
       res.status(400).json({
@@ -372,19 +385,11 @@ export async function studentLogin(req: Request, res: Response): Promise<void> {
     }
 
     const cleanUsn = String(usn).trim().toUpperCase();
-    const semNum = semesterNumber ? Number(semesterNumber) : undefined;
-    const cleanBranch = branchCode ? String(branchCode).trim().toUpperCase() : undefined;
-    const cleanSection = sectionName ? String(sectionName).trim().toUpperCase() : undefined;
 
     let student: any;
     try {
-      const whereClause: any = { usn: cleanUsn, active: true };
-      if (semNum) whereClause.semester = { number: semNum };
-      if (cleanBranch) whereClause.branch = { code: cleanBranch };
-      if (cleanSection) whereClause.section = { name: cleanSection };
-
       student = await prisma.student.findFirst({
-        where: whereClause,
+        where: { usn: cleanUsn, active: true },
         include: {
           semester: true,
           branch: true,
@@ -435,12 +440,7 @@ export async function studentLogin(req: Request, res: Response): Promise<void> {
       sectionId: student.sectionId,
     });
 
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
+    res.cookie('token', token, getAuthCookieOptions());
 
     res.json({
       token,
@@ -509,12 +509,7 @@ export async function adminLogin(req: Request, res: Response): Promise<void> {
       email: admin.email,
     });
 
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    res.cookie('token', token, getAuthCookieOptions());
 
     await logAuditAction({
       actorEmail: admin.email,
@@ -614,7 +609,7 @@ export async function logout(req: Request, res: Response): Promise<void> {
   res.clearCookie('token', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    sameSite: (process.env.NODE_ENV === 'production' ? 'none' : 'lax') as 'none' | 'lax',
   });
   res.json({ success: true, message: 'Logged out successfully.' });
 }

@@ -45,18 +45,6 @@ export async function apiRequest<T = any>(endpoint: string, options: RequestOpti
       body,
     });
 
-    if (response.status === 401) {
-      // Clear session cache on 401 Unauthorized
-      localStorage.removeItem('aurora_token');
-      localStorage.removeItem('aurora_user');
-      localStorage.removeItem('aurora_student');
-      localStorage.removeItem('aurora_admin');
-      if (!window.location.pathname.includes('/login')) {
-        window.location.href = '/login';
-      }
-      throw new Error('Session expired. Please log in again.');
-    }
-
     const contentType = response.headers.get('content-type');
     let data: any;
     if (contentType && contentType.includes('application/json')) {
@@ -65,11 +53,25 @@ export async function apiRequest<T = any>(endpoint: string, options: RequestOpti
       data = await response.text();
     }
 
-    if (!response.ok) {
-      const errorMessage = data?.error || `Request failed with status ${response.status}`;
+    if (response.status === 401) {
+      // Clear session cache on 401 Unauthorized
+      localStorage.removeItem('aurora_token');
+      localStorage.removeItem('aurora_user');
+      localStorage.removeItem('aurora_student');
+      localStorage.removeItem('aurora_admin');
+
+      const errorMessage = (typeof data === 'object' && data?.error) ? data.error : 'Authentication required. Please log in.';
       const errorObj = new Error(errorMessage) as any;
-      if (data?.code) errorObj.code = data.code;
-      if (data?.usn) errorObj.usn = data.usn;
+      if (typeof data === 'object' && data?.code) errorObj.code = data.code;
+      if (typeof data === 'object' && data?.usn) errorObj.usn = data.usn;
+      throw errorObj;
+    }
+
+    if (!response.ok) {
+      const errorMessage = (typeof data === 'object' && data?.error) ? data.error : `Request failed with status ${response.status}`;
+      const errorObj = new Error(errorMessage) as any;
+      if (typeof data === 'object' && data?.code) errorObj.code = data.code;
+      if (typeof data === 'object' && data?.usn) errorObj.usn = data.usn;
       throw errorObj;
     }
 

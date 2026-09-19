@@ -55,7 +55,11 @@ export const StudentLoginPage: React.FC = () => {
         localStorage.removeItem('bunk_remember_usn');
       }
 
-      await loginStudent(usn, semesterNumber, branchCode, sectionName, password);
+      if (showCohortDetails) {
+        await loginStudent(usn, password, { semesterNumber, branchCode, sectionName });
+      } else {
+        await loginStudent(usn, password);
+      }
       navigate('/');
     } catch (err: any) {
       if (err.code === 'SETUP_REQUIRED' || err.code === 'ACTIVATION_REQUIRED') {

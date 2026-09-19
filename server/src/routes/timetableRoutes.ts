@@ -8,6 +8,7 @@ import {
   saveManualTimetable,
   saveTimetableSlot,
   deleteTimetableEntry,
+  clearSectionTimetable,
   aiScanTimetable,
   aiConfirmTimetable,
 } from '../controllers/timetableController.js';
@@ -56,6 +57,7 @@ router.post('/confirm-import', requireAuth, requireAdmin, confirmTimetableImport
 router.post('/save-manual', requireAuth, requireAdmin, saveManualTimetable);
 router.post('/slot', requireAuth, requireAdmin, saveTimetableSlot);
 router.delete('/entry/:id', requireAuth, requireAdmin, deleteTimetableEntry);
+router.delete('/section', requireAuth, requireAdmin, clearSectionTimetable);
 
 // Smart AI Scanner Routes (Gemini Multimodal Ingest)
 router.post('/ai-scan', requireAuth, requireAdmin, imageUpload.single('file'), aiScanTimetable);
