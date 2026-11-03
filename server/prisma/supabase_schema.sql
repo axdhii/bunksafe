@@ -103,6 +103,9 @@ CREATE TABLE IF NOT EXISTS "Student" (
     "usn" TEXT NOT NULL UNIQUE, -- e.g. '1MS21CS001'
     "name" TEXT NOT NULL,
     "email" TEXT,
+    "phone" TEXT,
+    "passwordHash" TEXT,
+    "batch" TEXT DEFAULT 'B1',
     "semesterId" TEXT NOT NULL REFERENCES "Semester"("id") ON DELETE RESTRICT,
     "branchId" TEXT NOT NULL REFERENCES "Branch"("id") ON DELETE RESTRICT,
     "sectionId" TEXT NOT NULL REFERENCES "Section"("id") ON DELETE RESTRICT,
