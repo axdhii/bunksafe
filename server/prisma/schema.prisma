@@ -10,6 +10,7 @@ datasource db {
 model User {
   id        String   @id @default(uuid())
   role      String   // "STUDENT" | "ADMIN"
+  tokenVersion Int   @default(0) // bumped on logout / password change to revoke issued JWTs
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -13,6 +13,31 @@ export const StudentSettings: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [pushStatus, setPushStatus] = useState<string>('default');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [passwordMessage, setPasswordMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [changingPassword, setChangingPassword] = useState(false);
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordMessage(null);
+    setChangingPassword(true);
+    try {
+      const res = await apiRequest<{ token: string }>('/auth/change-password', {
+        method: 'POST',
+        data: { currentPassword, newPassword },
+      });
+      // Other devices are signed out; keep this one signed in with the fresh token
+      if (res.token) localStorage.setItem('aurora_token', res.token);
+      setCurrentPassword('');
+      setNewPassword('');
+      setPasswordMessage({ ok: true, text: 'Password changed. Other devices have been signed out.' });
+    } catch (err: any) {
+      setPasswordMessage({ ok: false, text: err.message || 'Could not change password.' });
+    } finally {
+      setChangingPassword(false);
+    }
+  };
 
   useEffect(() => {
     const fetchPrefs = async () => {
@@ -331,6 +356,50 @@ export const StudentSettings: React.FC = () => {
           </button>
         </div>
       </div>
+      {/* Change Password */}
+      <form onSubmit={handleChangePassword} className="p-6 rounded-3xl liquid-glass-card border border-white/10 space-y-4">
+        <h3 className="text-sm font-bold text-white">Change Password</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="text-xs text-zinc-400 font-sub space-y-1">
+            <span>Current password</span>
+            <input
+              type="password"
+              autoComplete="current-password"
+              required
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-white/10 text-white"
+            />
+          </label>
+          <label className="text-xs text-zinc-400 font-sub space-y-1">
+            <span>New password (8-72 characters)</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={8}
+              maxLength={72}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-white/10 text-white"
+            />
+          </label>
+        </div>
+        <div className="flex items-center justify-end gap-3">
+          {passwordMessage && (
+            <span role="status" className={`text-xs font-semibold font-sub ${passwordMessage.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {passwordMessage.text}
+            </span>
+          )}
+          <button
+            type="submit"
+            disabled={changingPassword}
+            className="px-6 py-2.5 rounded-xl bg-white text-black font-semibold text-xs hover:bg-zinc-200 active:scale-95 transition-all shadow-md disabled:opacity-50"
+          >
+            {changingPassword ? 'Changing...' : 'Change Password'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 };

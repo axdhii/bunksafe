@@ -10,6 +10,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE IF NOT EXISTS "User" (
     "id" TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
     "role" TEXT NOT NULL, -- 'STUDENT' | 'ADMIN'
+    "tokenVersion" INTEGER NOT NULL DEFAULT 0, -- bumped on logout / password change to revoke JWTs
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -205,3 +206,6 @@ CREATE TABLE IF NOT EXISTS "SystemSetting" (
 INSERT INTO "SystemSetting" ("key", "value", "description")
 VALUES ('MINIMUM_ATTENDANCE_THRESHOLD', '75.0', 'Minimum attendance percentage required across all courses')
 ON CONFLICT ("key") DO NOTHING;
+
+-- Upgrade for existing databases (safe to re-run)
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "tokenVersion" INTEGER NOT NULL DEFAULT 0;

@@ -1,3 +1,5 @@
+import { normalizeTime } from './timetableParser.js';
+
 export interface ExtractedSubject {
   code: string;
   name: string;
@@ -70,6 +72,11 @@ export function mergeConsecutiveScheduleEntries(entries: ExtractedScheduleEntry[
   }
 
   return merged;
+}
+
+/** A model stopped early if it returned fewer than 15 slots or covered fewer than 4 days. */
+export function isIncompleteSchedule(schedule: ExtractedScheduleEntry[]): boolean {
+  return schedule.length < 15 || new Set(schedule.map((s) => s.dayOfWeek)).size < 4;
 }
 
 export async function parseTimetableImageWithGemini(
@@ -197,6 +204,7 @@ Return strictly valid JSON matching this structure:
             'x-goog-api-key': apiKey,
           },
           body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(45000),
         }
       );
 
@@ -226,7 +234,7 @@ Return strictly valid JSON matching this structure:
       }));
 
       const rawEntries = parsed.schedule || parsed.entries || [];
-      const schedule: ExtractedScheduleEntry[] = rawEntries.map((e: any) => {
+      const mapped: (ExtractedScheduleEntry | null)[] = rawEntries.map((e: any) => {
         let dayNum = Number(e.dayOfWeek);
         if (isNaN(dayNum) || dayNum < 1 || dayNum > 7) {
           const rawDay = String(e.dayOfWeek || e.day || '').toLowerCase();
@@ -250,10 +258,15 @@ Return strictly valid JSON matching this structure:
         let entryType = String(e.type || 'LECTURE').trim().toUpperCase();
         if (entryType === 'THEORY') entryType = 'LECTURE';
 
+        // Drop slots with an unknown day or unreadable times instead of guessing (e.g. defaulting to Monday)
+        const startTime = normalizeTime(e.startTime);
+        const endTime = normalizeTime(e.endTime);
+        if (!(dayNum >= 1 && dayNum <= 7) || !startTime || !endTime || startTime >= endTime) return null;
+
         return {
-          dayOfWeek: dayNum || 1,
-          startTime: String(e.startTime || '').trim(),
-          endTime: String(e.endTime || '').trim(),
+          dayOfWeek: dayNum,
+          startTime,
+          endTime,
           subjectCode: String(e.subjectCode || '').trim().toUpperCase(),
           subjectName: e.subjectName ? String(e.subjectName).trim() : undefined,
           faculty: e.faculty ? String(e.faculty).trim() : undefined,
@@ -264,15 +277,16 @@ Return strictly valid JSON matching this structure:
         };
       });
 
+      const schedule = mapped.filter((e): e is ExtractedScheduleEntry => e !== null);
+
       // Deterministically merge any consecutive slots for the same subject/batch across multi-period blocks
       const cleanedSchedule = mergeConsecutiveScheduleEntries(schedule);
 
       // Completeness Gate: If a model extracted fewer than 15 entries or fewer than 4 distinct days,
       // it prematurely stopped. Reject and try next fallback model if available.
-      const uniqueDays = new Set(cleanedSchedule.map((s) => s.dayOfWeek));
-      if (cleanedSchedule.length < 15 && uniqueDays.size < 4 && model !== FALLBACK_MODELS[FALLBACK_MODELS.length - 1]) {
-        console.warn(`[AI Scanner] Model ${model} returned partial schedule (${cleanedSchedule.length} entries, ${uniqueDays.size} days). Trying fallback...`);
-        lastError = new Error(`Model ${model} returned incomplete schedule (${cleanedSchedule.length} entries, ${uniqueDays.size} days).`);
+      if (isIncompleteSchedule(cleanedSchedule) && model !== FALLBACK_MODELS[FALLBACK_MODELS.length - 1]) {
+        console.warn(`[AI Scanner] Model ${model} returned partial schedule (${cleanedSchedule.length} entries). Trying fallback...`);
+        lastError = new Error(`Model ${model} returned incomplete schedule (${cleanedSchedule.length} entries).`);
         continue;
       }
 

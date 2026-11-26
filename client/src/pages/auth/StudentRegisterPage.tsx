@@ -270,6 +270,7 @@ export const StudentRegisterPage: React.FC = () => {
                 <div className="space-y-3.5 animate-fade-in">
                   <div>
                     <label className="text-xs font-semibold text-zinc-300">Full Name</label>
+                    <p className="text-[11px] text-zinc-500 font-sub">Enter your complete name exactly as it appears on the college roster.</p>
                     <div className="mt-1 relative">
                       <User className="w-4 h-4 text-zinc-400 absolute left-3.5 top-3" />
                       <input

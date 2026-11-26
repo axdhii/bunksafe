@@ -2,6 +2,84 @@ import { Request, Response } from 'express';
 import { prisma } from '../prisma/client.js';
 import { calculateAttendance, calculateProjectionScenario, calculateAttendanceStreak, RiskLevel } from '../utils/attendanceEngine.js';
 import { sendSmartNotification } from '../services/notificationService.js';
+import { batchMatches, isValidBatch } from '../utils/batch.js';
+import { parseThreshold } from './academicController.js';
+
+const VALID_STATUSES = ['PRESENT', 'ABSENT', 'CANCELLED', 'RESCHEDULED', 'HOLIDAY'];
+
+/** A real calendar date in YYYY-MM-DD form that is not after today (college time). */
+export function isValidAttendanceDate(date: unknown, today = getCollegeDate().dateStr): boolean {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return !isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date && date <= today;
+}
+
+interface AttendanceInput {
+  subjectId: string;
+  timetableEntryId?: string | null;
+  date: string;
+  status: string;
+  remarks?: string | null;
+  syncId?: string | null;
+}
+
+/**
+ * Creates or updates the one record for a class. Prisma cannot upsert on a NULL key and timetable
+ * edits can leave records with a NULL slot, so the lookup is: exact slot -> orphaned record for the same
+ * subject/day (adopted onto the slot) -> create.
+ * Options: onlyIfMissing leaves existing records alone; notAfter skips records changed after that time.
+ * shortcut: find-then-write is not atomic; two simultaneous taps can still race, add a DB-level partial unique index if that shows up.
+ */
+async function saveAttendance(studentId: string, input: AttendanceInput, opts: { onlyIfMissing?: boolean; notAfter?: Date } = {}) {
+  const entryId = input.timetableEntryId || null;
+  const existing =
+    (entryId &&
+      (await prisma.attendance.findFirst({
+        where: { studentId, subjectId: input.subjectId, date: input.date, timetableEntryId: entryId },
+      }))) ||
+    (await prisma.attendance.findFirst({
+      where: { studentId, subjectId: input.subjectId, date: input.date, timetableEntryId: null },
+      orderBy: { createdAt: 'asc' },
+    }));
+
+  const data = { status: input.status, remarks: input.remarks ?? null, syncId: input.syncId ?? null };
+  if (existing) {
+    if (opts.onlyIfMissing) return existing;
+    if (opts.notAfter && existing.updatedAt > opts.notAfter) return existing; // newer mark wins
+    return prisma.attendance.update({
+      where: { id: existing.id },
+      data: { ...data, timetableEntryId: entryId ?? existing.timetableEntryId },
+    });
+  }
+  return prisma.attendance.create({
+    data: { studentId, subjectId: input.subjectId, date: input.date, timetableEntryId: entryId, ...data },
+  });
+}
+
+/** Checks a mark against the student's cohort and active timetable. Returns an error message or null. */
+async function validateMark(
+  student: { semesterId: string; branchId: string; sectionId: string },
+  input: AttendanceInput,
+  subjectsById: Map<string, { semesterId: string; branchId: string }>
+): Promise<string | null> {
+  if (!input.subjectId || !VALID_STATUSES.includes(input.status)) return 'Invalid subject or status.';
+  if (!isValidAttendanceDate(input.date)) return 'Date must be a valid YYYY-MM-DD date that is not in the future.';
+  const subject = subjectsById.get(input.subjectId);
+  if (!subject) return 'Subject not found.';
+  if (subject.semesterId !== student.semesterId || subject.branchId !== student.branchId) {
+    return 'Subject does not belong to your enrolled academic cohort.';
+  }
+  if (input.timetableEntryId) {
+    const entry = await prisma.timetableEntry.findUnique({
+      where: { id: String(input.timetableEntryId) },
+      include: { timetable: { select: { sectionId: true } } },
+    });
+    if (!entry || entry.subjectId !== input.subjectId || entry.timetable.sectionId !== student.sectionId) {
+      return 'That class slot does not match this subject in your timetable.';
+    }
+  }
+  return null;
+}
 
 export function getCollegeDate(refDate: Date = new Date()): { dateStr: string; dayOfWeek: number } {
   // Asia/Kolkata timezone ensures serverless hosts in UTC resolve the correct campus day
@@ -73,7 +151,7 @@ export async function getDashboard(req: Request, res: Response): Promise<void> {
       }),
     ]);
 
-    const defaultThreshold = thresholdSetting ? parseFloat(thresholdSetting.value) : 85.0;
+    const defaultThreshold = parseThreshold(thresholdSetting?.value) ?? 85.0;
 
     // 5. Compute per-subject metrics
     let totalConducted = 0;
@@ -103,7 +181,7 @@ export async function getDashboard(req: Request, res: Response): Promise<void> {
       totalAttended += attended;
       totalAbsent += absent;
 
-      const metrics = calculateAttendance(attended, conducted, sub.minimumThreshold || defaultThreshold);
+      const metrics = calculateAttendance(attended, conducted, sub.minimumThreshold);
 
       // Trend: compare with attendance before the latest conducted record
       let trend: 'UP' | 'DOWN' | 'STABLE' = 'STABLE';
@@ -123,7 +201,7 @@ export async function getDashboard(req: Request, res: Response): Promise<void> {
         code: sub.code,
         name: sub.name,
         credits: sub.credits,
-        minimumThreshold: sub.minimumThreshold || defaultThreshold,
+        minimumThreshold: sub.minimumThreshold,
         conducted,
         attended,
         absent,
@@ -198,12 +276,14 @@ export async function getDashboard(req: Request, res: Response): Promise<void> {
         room: entry.room,
         title: entry.title,
         batch: entry.batch || 'ALL',
+        subjectId: entry.subjectId,
+        appliesToMe: batchMatches(entry.batch, student.batch),
         subject: entry.subject
           ? {
               id: entry.subject.id,
               code: entry.subject.code,
               name: entry.subject.name,
-              minimumThreshold: entry.subject.minimumThreshold || defaultThreshold,
+              minimumThreshold: entry.subject.minimumThreshold,
             }
           : null,
         status: marked ? marked.status : undefined,
@@ -221,6 +301,7 @@ export async function getDashboard(req: Request, res: Response): Promise<void> {
         usn: student.usn,
         name: student.name,
         email: student.email,
+        batch: student.batch,
         semester: student.semester,
         branch: student.branch,
         section: student.section,
@@ -262,84 +343,46 @@ export async function markAttendance(req: Request, res: Response): Promise<void>
       return;
     }
 
-    const validStatuses = ['PRESENT', 'ABSENT', 'CANCELLED', 'RESCHEDULED', 'HOLIDAY'];
-    if (!validStatuses.includes(status)) {
-      res.status(400).json({ error: `Invalid status "${status}".` });
-      return;
-    }
-
-    // SEC-HIGH-02: Verify student exists and subject belongs to student's enrolled cohort
     const student = await prisma.student.findUnique({
       where: { id: studentId },
-      select: { semesterId: true, branchId: true },
+      select: { semesterId: true, branchId: true, sectionId: true },
     });
     if (!student) {
       res.status(404).json({ error: 'Student not found.' });
       return;
     }
 
-    // Verify subject exists
-    const subject = await prisma.subject.findUnique({
-      where: { id: subjectId },
-    });
+    const subject = await prisma.subject.findUnique({ where: { id: String(subjectId) } });
     if (!subject) {
       res.status(404).json({ error: 'Subject not found.' });
       return;
     }
 
-    if (subject.semesterId !== student.semesterId || subject.branchId !== student.branchId) {
-      res.status(403).json({ error: 'Subject does not belong to your enrolled academic cohort.' });
+    const input: AttendanceInput = {
+      subjectId: subject.id,
+      timetableEntryId: timetableEntryId ? String(timetableEntryId) : null,
+      date: String(date),
+      status: String(status),
+      remarks: remarks ? String(remarks).slice(0, 500) : null,
+      syncId: syncId ? String(syncId) : null,
+    };
+    const invalid = await validateMark(student, input, new Map([[subject.id, subject]]));
+    if (invalid) {
+      res.status(invalid.includes('cohort') ? 403 : 400).json({ error: invalid });
       return;
     }
 
-    // PERF-4: Use count queries instead of loading all records into memory
-    const [prevConducted, prevAttended] = await Promise.all([
-      prisma.attendance.count({
-        where: { studentId, subjectId, status: { in: ['PRESENT', 'ABSENT'] } },
-      }),
-      prisma.attendance.count({
-        where: { studentId, subjectId, status: 'PRESENT' },
-      }),
-    ]);
-    const prevMetrics = calculateAttendance(prevAttended, prevConducted, subject.minimumThreshold);
+    const countMetrics = async () => {
+      const [conducted, attended] = await Promise.all([
+        prisma.attendance.count({ where: { studentId, subjectId: subject.id, status: { in: ['PRESENT', 'ABSENT'] } } }),
+        prisma.attendance.count({ where: { studentId, subjectId: subject.id, status: 'PRESENT' } }),
+      ]);
+      return calculateAttendance(attended, conducted, subject.minimumThreshold);
+    };
 
-    // Upsert attendance record
-    const attendanceRecord = await prisma.attendance.upsert({
-      where: {
-        studentId_subjectId_date_timetableEntryId: {
-          studentId,
-          subjectId,
-          date,
-          timetableEntryId: timetableEntryId || '',
-        },
-      },
-      update: {
-        status,
-        remarks,
-        syncId,
-        updatedAt: new Date(),
-      },
-      create: {
-        studentId,
-        subjectId,
-        timetableEntryId: timetableEntryId || null,
-        date,
-        status,
-        remarks,
-        syncId,
-      },
-    });
-
-    // Compute new metrics using count queries
-    const [newConducted, newAttended] = await Promise.all([
-      prisma.attendance.count({
-        where: { studentId, subjectId, status: { in: ['PRESENT', 'ABSENT'] } },
-      }),
-      prisma.attendance.count({
-        where: { studentId, subjectId, status: 'PRESENT' },
-      }),
-    ]);
-    const newMetrics = calculateAttendance(newAttended, newConducted, subject.minimumThreshold);
+    const prevMetrics = await countMetrics();
+    const attendanceRecord = await saveAttendance(studentId, input);
+    const newMetrics = await countMetrics();
 
     // Trigger Smart Notifications on state transitions
     if (prevMetrics.risk !== 'CRITICAL' && newMetrics.risk === 'CRITICAL') {
@@ -348,7 +391,7 @@ export async function markAttendance(req: Request, res: Response): Promise<void>
         title: `Attendance Alert: ${subject.name}`,
         message: `Your attendance in ${subject.code} has fallen to ${newMetrics.percentage}%, below the required ${subject.minimumThreshold}%. You need ${newMetrics.recoveryRequired} consecutive classes to recover.`,
         category: 'ATTENDANCE_WARNING',
-        deduplicationKey: `ATTENDANCE_WARNING:${studentId}:${subjectId}:CRITICAL:${date}`,
+        deduplicationKey: `ATTENDANCE_WARNING:${studentId}:${subject.id}:CRITICAL:${input.date}`,
         isUrgent: true,
       });
     } else if (prevMetrics.risk === 'CRITICAL' && newMetrics.risk !== 'CRITICAL') {
@@ -357,7 +400,7 @@ export async function markAttendance(req: Request, res: Response): Promise<void>
         title: `Recovery Achieved: ${subject.name}`,
         message: `Great job! Your attendance in ${subject.code} has recovered to ${newMetrics.percentage}%.`,
         category: 'RECOVERY',
-        deduplicationKey: `RECOVERY:${studentId}:${subjectId}:SAFE:${date}`,
+        deduplicationKey: `RECOVERY:${studentId}:${subject.id}:SAFE:${input.date}`,
       });
     }
 
@@ -369,6 +412,25 @@ export async function markAttendance(req: Request, res: Response): Promise<void>
   } catch (error: any) {
     console.error('markAttendance error:', error);
     res.status(500).json({ error: 'Could not save attendance. Please try again.' });
+  }
+}
+
+export async function setStudentBatch(req: Request, res: Response): Promise<void> {
+  try {
+    const { batch } = req.body;
+    if (!isValidBatch(batch)) {
+      res.status(400).json({ error: 'Batch must look like A1, B2 or 1.' });
+      return;
+    }
+    const student = await prisma.student.update({
+      where: { id: req.user!.studentId! },
+      data: { batch: String(batch).trim().toUpperCase() },
+      select: { batch: true },
+    });
+    res.json({ success: true, batch: student.batch });
+  } catch (error: any) {
+    console.error('setStudentBatch error:', error);
+    res.status(500).json({ error: 'Failed to update batch.' });
   }
 }
 
@@ -404,49 +466,28 @@ export async function batchMarkTodayPresent(req: Request, res: Response): Promis
       return;
     }
 
-    // LOGIC-HIGH-03: Filter by student's batch to avoid over-crediting parallel split lab batches
-    const studentBatch = student.batch?.trim().toUpperCase();
-    const validClassEntries = timetable.entries.filter((entry) => {
-      if (!entry.subjectId) return false;
-      if (!entry.batch || entry.batch === 'ALL') return true;
-      if (!studentBatch) return true;
-      return entry.batch.toUpperCase() === studentBatch;
-    });
+    // Only the student's own batch, so parallel split labs are not double-credited
+    const validClassEntries = timetable.entries.filter(
+      (entry) => entry.subjectId && batchMatches(entry.batch, student.batch)
+    );
 
     if (validClassEntries.length === 0) {
       res.status(400).json({ error: "No classes scheduled for your batch today to mark." });
       return;
     }
 
-    const operations = validClassEntries.map((entry) =>
-      prisma.attendance.upsert({
-        where: {
-          studentId_subjectId_date_timetableEntryId: {
-            studentId,
-            subjectId: entry.subjectId!,
-            date: todayDateStr,
-            timetableEntryId: entry.id,
-          },
-        },
-        update: {
-          status: 'PRESENT',
-          updatedAt: new Date(),
-        },
-        create: {
-          studentId,
-          subjectId: entry.subjectId!,
-          timetableEntryId: entry.id,
-          date: todayDateStr,
-          status: 'PRESENT',
-        },
-      })
-    );
-
-    await prisma.$transaction(operations);
+    // Never overwrite a status the student already chose (ABSENT, CANCELLED, ...)
+    for (const entry of validClassEntries) {
+      await saveAttendance(
+        studentId,
+        { subjectId: entry.subjectId!, timetableEntryId: entry.id, date: todayDateStr, status: 'PRESENT' },
+        { onlyIfMissing: true }
+      );
+    }
 
     res.json({
       success: true,
-      message: `Marked all ${validClassEntries.length} scheduled classes as present for today.`,
+      message: `Marked unmarked classes as present for today (${validClassEntries.length} in your schedule).`,
     });
   } catch (error: any) {
     console.error('batchMarkTodayPresent error:', error);
@@ -536,8 +577,14 @@ export async function getProjections(req: Request, res: Response): Promise<void>
         sectionId: student.sectionId,
         isActive: true,
       },
-      include: { entries: true },
+      include: { entries: true, academicYear: true },
     });
+
+    // Remaining teaching weeks until the academic year ends (8 if no end date is known)
+    const endDate = timetable?.academicYear?.endDate;
+    const remainingWeeks = endDate
+      ? Math.max(0, Math.ceil((endDate.getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000)))
+      : 8;
 
     const projections = subjects.map((sub) => {
       const records = attendances.filter((r) => r.subjectId === sub.id);
@@ -549,8 +596,9 @@ export async function getProjections(req: Request, res: Response): Promise<void>
       }
 
       // Count classes per week for this subject
-      const weeklySlots = timetable?.entries.filter((e) => e.subjectId === sub.id).length || 3;
-      const estimatedRemaining = weeklySlots * 8; // approx 8 remaining weeks in semester
+      const weeklySlots =
+        timetable?.entries.filter((e) => e.subjectId === sub.id && batchMatches(e.batch, student.batch)).length ?? 0;
+      const estimatedRemaining = weeklySlots * remainingWeeks;
 
       const scenario = calculateProjectionScenario(attended, conducted, estimatedRemaining);
 
@@ -584,65 +632,54 @@ export async function syncOfflineAttendance(req: Request, res: Response): Promis
     const { items } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) {
-      res.json({ success: true, synced: 0 });
+      res.json({ success: true, synced: 0, processed: [], rejected: [] });
       return;
     }
 
-    // SEC-MED-01: Bound maximum items per sync payload to prevent denial-of-service
     if (items.length > 100) {
       res.status(400).json({ error: 'Maximum 100 attendance items can be synced at once.' });
       return;
     }
 
-    const validStatuses = ['PRESENT', 'ABSENT', 'CANCELLED', 'RESCHEDULED', 'HOLIDAY'];
-    // PERF-5: Batch all upserts in a single transaction instead of sequential calls
-    const validItems = items.filter(
-      (item: any) =>
-        item.subjectId &&
-        item.date &&
-        typeof item.date === 'string' &&
-        /^\d{4}-\d{2}-\d{2}$/.test(item.date) &&
-        item.status &&
-        validStatuses.includes(item.status)
-    );
-
-    if (validItems.length === 0) {
-      res.json({ success: true, synced: 0 });
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: { semesterId: true, branchId: true, sectionId: true },
+    });
+    if (!student) {
+      res.status(404).json({ error: 'Student not found.' });
       return;
     }
 
-    await prisma.$transaction(
-      validItems.map((item: any) =>
-        prisma.attendance.upsert({
-          where: {
-            studentId_subjectId_date_timetableEntryId: {
-              studentId,
-              subjectId: item.subjectId,
-              date: item.date,
-              timetableEntryId: item.timetableEntryId || '',
-            },
-          },
-          update: {
-            status: item.status,
-            remarks: item.remarks,
-            syncId: item.syncId,
-            updatedAt: new Date(),
-          },
-          create: {
-            studentId,
-            subjectId: item.subjectId,
-            timetableEntryId: item.timetableEntryId || null,
-            date: item.date,
-            status: item.status,
-            remarks: item.remarks,
-            syncId: item.syncId,
-          },
-        })
-      )
-    );
-    const syncedCount = validItems.length;
+    const subjectIds = [...new Set(items.map((i: any) => String(i?.subjectId || '')).filter(Boolean))];
+    const subjects = await prisma.subject.findMany({ where: { id: { in: subjectIds } } });
+    const subjectsById = new Map(subjects.map((s) => [s.id, s]));
 
-    res.json({ success: true, synced: syncedCount });
+    // processed: syncIds the client can drop from its queue; rejected: ones that can never succeed
+    const processed: string[] = [];
+    const rejected: string[] = [];
+    for (const item of items) {
+      const syncId = item?.syncId ? String(item.syncId) : '';
+      const input: AttendanceInput = {
+        subjectId: String(item?.subjectId || ''),
+        timetableEntryId: item?.timetableEntryId ? String(item.timetableEntryId) : null,
+        date: String(item?.date || ''),
+        status: String(item?.status || ''),
+        remarks: item?.remarks ? String(item.remarks).slice(0, 500) : null,
+        syncId: syncId || null,
+      };
+      const invalid = await validateMark(student, input, subjectsById);
+      if (invalid) {
+        rejected.push(syncId);
+      } else {
+        const markedAt = Number(item.timestamp);
+        await saveAttendance(studentId, input, {
+          notAfter: Number.isFinite(markedAt) && markedAt > 0 ? new Date(markedAt) : undefined,
+        });
+      }
+      processed.push(syncId);
+    }
+
+    res.json({ success: true, synced: processed.length - rejected.length, processed, rejected });
   } catch (error: any) {
     console.error('syncOfflineAttendance error:', error);
     res.status(500).json({ error: 'Failed to sync offline attendance records.' });

@@ -2,6 +2,18 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../prisma/client.js';
 import { logAuditAction } from '../services/auditService.js';
+import { isValidBatch } from '../utils/batch.js';
+
+/** Valid thresholds are percentages strictly between 0 and 100 (100 makes recovery impossible). */
+export function parseThreshold(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : parseFloat(String(value));
+  return Number.isFinite(n) && n > 0 && n < 100 ? n : null;
+}
+
+async function globalThreshold(): Promise<number> {
+  const setting = await prisma.systemSetting.findUnique({ where: { key: 'MINIMUM_ATTENDANCE_THRESHOLD' } });
+  return parseThreshold(setting?.value) ?? 85.0;
+}
 
 // ==================== SEMESTERS ====================
 export async function getSemesters(req: Request, res: Response): Promise<void> {
@@ -80,7 +92,7 @@ export async function deleteSemester(req: Request, res: Response): Promise<void>
     res.json({ success: true });
   } catch (error: any) {
     console.error('deleteSemester error:', error);
-    res.status(500).json({ error: error.message || 'Failed to delete semester.' });
+    res.status(500).json({ error: 'Failed to delete semester.' });
   }
 }
 
@@ -187,7 +199,7 @@ export async function deleteBranch(req: Request, res: Response): Promise<void> {
     res.json({ success: true, message: `Branch ${branch.code} removed successfully.` });
   } catch (error: any) {
     console.error('deleteBranch error:', error);
-    res.status(500).json({ error: error.message || 'Failed to delete branch.' });
+    res.status(500).json({ error: 'Failed to delete branch.' });
   }
 }
 
@@ -259,10 +271,20 @@ export async function deleteSection(req: Request, res: Response): Promise<void> 
       await tx.section.delete({ where: { id } });
     });
 
+    await logAuditAction({
+      actorEmail: req.user!.email || 'admin',
+      actorRole: 'ADMIN',
+      action: 'SECTION_DELETED',
+      targetEntity: 'Section',
+      targetId: id,
+      details: { name: section.name, branch: section.branch.code },
+      ipAddress: req.ip,
+    });
+
     res.json({ success: true, message: `Section ${section.name} removed successfully.` });
   } catch (error: any) {
     console.error('deleteSection error:', error);
-    res.status(500).json({ error: error.message || 'Failed to delete section.' });
+    res.status(500).json({ error: 'Failed to delete section.' });
   }
 }
 
@@ -284,6 +306,11 @@ export async function getSubjects(req: Request, res: Response): Promise<void> {
 export async function createSubject(req: Request, res: Response): Promise<void> {
   try {
     const { code, name, credits, semesterId, branchId, minimumThreshold } = req.body;
+    const threshold = minimumThreshold !== undefined && minimumThreshold !== '' ? parseThreshold(minimumThreshold) : await globalThreshold();
+    if (threshold === null) {
+      res.status(400).json({ error: 'Minimum threshold must be a number between 0 and 100.' });
+      return;
+    }
     const subject = await prisma.subject.create({
       data: {
         code: String(code).trim().toUpperCase(),
@@ -291,7 +318,7 @@ export async function createSubject(req: Request, res: Response): Promise<void> 
         credits: Number(credits) || 4,
         semesterId,
         branchId,
-        minimumThreshold: minimumThreshold ? parseFloat(minimumThreshold) : 85.0,
+        minimumThreshold: threshold,
       },
       include: { semester: true, branch: true },
     });
@@ -314,12 +341,17 @@ export async function updateSubject(req: Request, res: Response): Promise<void> 
   try {
     const id = String(req.params.id);
     const { name, credits, minimumThreshold } = req.body;
+    const threshold = minimumThreshold !== undefined ? parseThreshold(minimumThreshold) : undefined;
+    if (threshold === null) {
+      res.status(400).json({ error: 'Minimum threshold must be a number between 0 and 100.' });
+      return;
+    }
     const subject = await prisma.subject.update({
       where: { id },
       data: {
         name: name ? String(name).trim() : undefined,
         credits: credits !== undefined ? Number(credits) : undefined,
-        minimumThreshold: minimumThreshold !== undefined ? parseFloat(minimumThreshold) : undefined,
+        minimumThreshold: threshold,
       },
     });
     await logAuditAction({
@@ -370,7 +402,7 @@ export async function deleteSubject(req: Request, res: Response): Promise<void> 
     res.json({ success: true, message: `Subject ${subject.code} deleted successfully.` });
   } catch (error: any) {
     console.error('deleteSubject error:', error);
-    res.status(500).json({ error: error.message || 'Failed to delete subject.' });
+    res.status(500).json({ error: 'Failed to delete subject.' });
   }
 }
 
@@ -385,9 +417,9 @@ export async function getStudents(req: Request, res: Response): Promise<void> {
   if (search && typeof search === 'string') {
     const term = search.trim();
     where.OR = [
-      { usn: { contains: term } },
-      { name: { contains: term } },
-      { email: { contains: term } },
+      { usn: { contains: term, mode: 'insensitive' } },
+      { name: { contains: term, mode: 'insensitive' } },
+      { email: { contains: term, mode: 'insensitive' } },
     ];
   }
 
@@ -459,14 +491,31 @@ export async function createStudent(req: Request, res: Response): Promise<void> 
     res.status(201).json({ student });
   } catch (error: any) {
     console.error('createStudent error:', error);
-    res.status(400).json({ error: 'Failed to create student: ' + error.message });
+    res.status(400).json({ error: 'Failed to create student. Check the USN is unique and the semester, branch and section are valid.' });
   }
 }
 
 export async function updateStudent(req: Request, res: Response): Promise<void> {
   try {
     const id = String(req.params.id);
-    const { name, email, semesterId, branchId, sectionId, active } = req.body;
+    const { name, email, semesterId, branchId, sectionId, active, batch } = req.body;
+
+    if (semesterId || branchId || sectionId) {
+      const current = await prisma.student.findUnique({ where: { id } });
+      if (!current) {
+        res.status(404).json({ error: 'Student not found.' });
+        return;
+      }
+      const sec = await prisma.section.findUnique({ where: { id: sectionId || current.sectionId } });
+      if (!sec || sec.semesterId !== (semesterId || current.semesterId) || sec.branchId !== (branchId || current.branchId)) {
+        res.status(400).json({ error: 'Section does not belong to the selected semester and branch.' });
+        return;
+      }
+    }
+    if (batch !== undefined && batch !== null && !isValidBatch(batch)) {
+      res.status(400).json({ error: 'Batch must look like A1, B2 or 1.' });
+      return;
+    }
 
     const student = await prisma.student.update({
       where: { id },
@@ -477,6 +526,7 @@ export async function updateStudent(req: Request, res: Response): Promise<void> 
         branchId: branchId || undefined,
         sectionId: sectionId || undefined,
         active: active !== undefined ? Boolean(active) : undefined,
+        batch: batch !== undefined ? (batch ? String(batch).trim().toUpperCase() : null) : undefined,
       },
       include: {
         semester: true,
@@ -498,6 +548,35 @@ export async function updateStudent(req: Request, res: Response): Promise<void> 
     res.json({ student });
   } catch (error: any) {
     res.status(400).json({ error: 'Failed to update student.' });
+  }
+}
+
+/** Clears a student's password so the account can be claimed again, and signs out all their sessions. */
+export async function resetStudentPassword(req: Request, res: Response): Promise<void> {
+  try {
+    const id = String(req.params.id);
+    const student = await prisma.student.findUnique({ where: { id } });
+    if (!student) {
+      res.status(404).json({ error: 'Student not found.' });
+      return;
+    }
+    await prisma.$transaction([
+      prisma.student.update({ where: { id }, data: { passwordHash: null } }),
+      prisma.user.update({ where: { id: student.userId }, data: { tokenVersion: { increment: 1 } } }),
+    ]);
+    await logAuditAction({
+      actorEmail: req.user!.email || 'admin',
+      actorRole: 'ADMIN',
+      action: 'STUDENT_PASSWORD_RESET',
+      targetEntity: 'Student',
+      targetId: id,
+      details: { usn: student.usn },
+      ipAddress: req.ip,
+    });
+    res.json({ success: true, message: `Password cleared for ${student.usn}. The student can now register again to set a new one.` });
+  } catch (error: any) {
+    console.error('resetStudentPassword error:', error);
+    res.status(500).json({ error: 'Failed to reset password.' });
   }
 }
 
@@ -539,6 +618,14 @@ export async function getSystemSettings(req: Request, res: Response): Promise<vo
 export async function updateSystemSetting(req: Request, res: Response): Promise<void> {
   try {
     const { key, value, description } = req.body;
+    if (!key || typeof key !== 'string') {
+      res.status(400).json({ error: 'Setting key is required.' });
+      return;
+    }
+    if (key === 'MINIMUM_ATTENDANCE_THRESHOLD' && parseThreshold(value) === null) {
+      res.status(400).json({ error: 'Minimum threshold must be a number between 0 and 100.' });
+      return;
+    }
     const setting = await prisma.systemSetting.upsert({
       where: { key },
       update: { value: String(value), description },

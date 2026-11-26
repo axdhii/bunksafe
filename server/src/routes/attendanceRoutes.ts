@@ -6,6 +6,7 @@ import {
   getAttendanceHistory,
   getProjections,
   syncOfflineAttendance,
+  setStudentBatch,
 } from '../controllers/attendanceController.js';
 import { requireAuth, requireStudent } from '../middleware/auth.js';
 
@@ -20,5 +21,6 @@ router.post('/mark-all-today', batchMarkTodayPresent);
 router.get('/history', getAttendanceHistory);
 router.get('/projections', getProjections);
 router.post('/sync', syncOfflineAttendance);
+router.put('/batch', setStudentBatch);
 
 export default router;

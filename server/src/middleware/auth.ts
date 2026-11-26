@@ -18,6 +18,7 @@ export interface AuthPayload {
   semesterId?: string;
   branchId?: string;
   sectionId?: string;
+  tv?: number; // User.tokenVersion at issue time
 }
 
 declare global {
@@ -34,28 +35,43 @@ export function generateToken(payload: AuthPayload): string {
   });
 }
 
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
+export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+  let token: string | undefined;
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7);
+  } else if (req.cookies && req.cookies.token) {
+    token = req.cookies.token;
+  }
+
+  if (!token) {
+    res.status(401).json({ error: 'Authentication required. Please log in.' });
+    return;
+  }
+
+  let decoded: AuthPayload;
   try {
-    let token: string | undefined;
+    decoded = jwt.verify(token, AUTH_SECRET) as AuthPayload;
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired session. Please log in again.' });
+    return;
+  }
 
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      token = authHeader.substring(7);
-    } else if (req.cookies && req.cookies.token) {
-      token = req.cookies.token;
-    }
-
-    if (!token) {
-      res.status(401).json({ error: 'Authentication required. Please log in.' });
+  try {
+    // Revocation: logout and password changes bump tokenVersion, killing older tokens
+    const user = await prisma.user.findUnique({ where: { id: decoded.userId }, select: { tokenVersion: true } });
+    if (!user || (decoded.tv ?? 0) !== user.tokenVersion) {
+      res.status(401).json({ error: 'Invalid or expired session. Please log in again.' });
       return;
     }
-
-    const decoded = jwt.verify(token, AUTH_SECRET) as AuthPayload;
-    req.user = decoded;
-    next();
   } catch (err) {
-    res.status(401).json({ error: 'Invalid or expired session. Please log in again.' });
+    console.error('requireAuth verification error:', err);
+    res.status(503).json({ error: 'Service temporarily unavailable. Please try again.' });
+    return;
   }
+
+  req.user = decoded;
+  next();
 }
 
 export function requireAdmin(req: Request, res: Response, next: NextFunction) {
@@ -81,7 +97,10 @@ export async function requireStudent(req: Request, res: Response, next: NextFunc
       return;
     }
   } catch (err) {
+    // Fail closed: never let a request through when we could not verify the account
     console.error('requireStudent verification error:', err);
+    res.status(503).json({ error: 'Service temporarily unavailable. Please try again.' });
+    return;
   }
   next();
 }

@@ -128,7 +128,7 @@ export const AiTimetableScanModal: React.FC<AiTimetableScanModalProps> = ({
     setError(null);
 
     try {
-      await apiRequest('/timetable/ai-confirm', {
+      const res = await apiRequest<{ skipped?: number; unresolvedCodes?: string[] }>('/timetable/ai-confirm', {
         method: 'POST',
         data: {
           sectionId,
@@ -138,6 +138,14 @@ export const AiTimetableScanModal: React.FC<AiTimetableScanModalProps> = ({
           schedule: scanResult.schedule,
         },
       });
+
+      const notes = [
+        res.skipped ? `${res.skipped} slot(s) were skipped because their day or time could not be read.` : '',
+        res.unresolvedCodes?.length
+          ? `These codes did not match any subject, so students cannot mark them: ${res.unresolvedCodes.join(', ')}. Add the subjects, then rescan or edit the slots.`
+          : '',
+      ].filter(Boolean);
+      if (notes.length) alert(`Timetable saved.\n\n${notes.join('\n\n')}`);
 
       onSuccess();
       handleClose();

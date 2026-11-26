@@ -19,12 +19,11 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB limit
   fileFilter: (req, file, cb) => {
     const ext = file.originalname.split('.').pop()?.toLowerCase();
-    const isCsv = ext === 'csv' || file.mimetype.includes('csv') || file.mimetype === 'text/plain';
-    const isXlsx = ext === 'xlsx' || file.mimetype.includes('spreadsheet') || file.mimetype.includes('excel');
-    if (isCsv || isXlsx) {
+    // The extension decides how the file is parsed, so it must be one we support
+    if (ext === 'csv' || ext === 'xlsx') {
       cb(null, true);
     } else {
-      cb(new Error('Invalid file format. Only .csv and .xlsx files are supported.'));
+      cb(Object.assign(new Error('Invalid file format. Only .csv and .xlsx files are supported.'), { status: 400 }));
     }
   },
 });
@@ -33,14 +32,10 @@ const imageUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
   fileFilter: (req, file, cb) => {
-    const isImageOrPdf =
-      file.mimetype.startsWith('image/') ||
-      file.mimetype === 'application/pdf' ||
-      /\.(jpg|jpeg|png|webp|pdf)$/i.test(file.originalname);
-    if (isImageOrPdf) {
+    if (/\.(jpg|jpeg|png|webp|pdf)$/i.test(file.originalname)) {
       cb(null, true);
     } else {
-      cb(new Error('Invalid file format. Only image files (JPEG, PNG, WEBP) and PDFs are supported.'));
+      cb(Object.assign(new Error('Invalid file format. Only image files (JPEG, PNG, WEBP) and PDFs are supported.'), { status: 400 }));
     }
   },
 });

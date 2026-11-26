@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { apiRequest } from '../api/client';
+import { apiRequest, invalidateApiCache } from '../api/client';
 import { User, StudentProfile } from '../types';
 
 interface AuthContextType {
@@ -148,12 +148,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     try {
+      // Push any offline marks while this user's session is still valid; the queue is cleared below
+      // so they can never be replayed under the next user's account.
+      let queue: unknown = [];
+      try { queue = JSON.parse(localStorage.getItem('aurora_offline_queue') || '[]'); } catch { /* corrupt queue */ }
+      if (Array.isArray(queue) && queue.length && navigator.onLine) {
+        await apiRequest('/attendance/sync', { method: 'POST', data: { items: queue } }).catch(() => {});
+      }
       await apiRequest('/auth/logout', { method: 'POST' }).catch(() => {});
     } finally {
       localStorage.removeItem('aurora_token');
       localStorage.removeItem('aurora_user');
       localStorage.removeItem('aurora_student');
       localStorage.removeItem('aurora_admin');
+      localStorage.removeItem('aurora_offline_queue');
+      invalidateApiCache();
+      // The service worker caches personal API responses by URL; drop them so the next user never sees them
+      if ('caches' in window) {
+        await Promise.all(['api-dashboard-cache', 'api-timetable-cache'].map((name) => caches.delete(name))).catch(() => {});
+      }
       setUser(null);
       setStudent(null);
       setAdmin(null);

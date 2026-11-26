@@ -17,13 +17,24 @@ import {
   createStudent,
   updateStudent,
   deleteStudent,
+  resetStudentPassword,
   getSystemSettings,
   updateSystemSetting,
   getAuditLogs,
 } from '../controllers/academicController.js';
+import { Request, Response, NextFunction } from 'express';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
+
+// Express 4 does not catch rejected promises; forward them to the error handler instead of hanging/crashing
+const methods = ['get', 'post', 'put', 'delete'] as const;
+for (const m of methods) {
+  const original = router[m].bind(router) as any;
+  (router as any)[m] = (path: string, ...handlers: any[]) =>
+    original(path, ...handlers.map((h) => (req: Request, res: Response, next: NextFunction) =>
+      Promise.resolve(h(req, res, next)).catch(next)));
+}
 
 // Public read routes for dropdowns & academic structure during student onboarding
 router.get('/semesters', getSemesters);
@@ -49,6 +60,7 @@ router.get('/students', requireAuth, requireAdmin, getStudents);
 router.post('/students', requireAuth, requireAdmin, createStudent);
 router.put('/students/:id', requireAuth, requireAdmin, updateStudent);
 router.delete('/students/:id', requireAuth, requireAdmin, deleteStudent);
+router.post('/students/:id/reset-password', requireAuth, requireAdmin, resetStudentPassword);
 
 router.get('/settings', requireAuth, requireAdmin, getSystemSettings);
 router.put('/settings', requireAuth, requireAdmin, updateSystemSetting);

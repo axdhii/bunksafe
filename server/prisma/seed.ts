@@ -9,6 +9,21 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Starting database seed for Smart College Attendance Platform...');
 
+  // Safety: this seed wipes every table. Refuse to run on a database that already has users,
+  // and refuse production unless explicitly allowed (it creates demo accounts with known passwords).
+  if (process.env.NODE_ENV === 'production' && process.env.SEED_ALLOW_PRODUCTION !== 'true') {
+    throw new Error('Refusing to seed with NODE_ENV=production. Set SEED_ALLOW_PRODUCTION=true for a first-time demo setup.');
+  }
+  const existingUsers = await prisma.user.count();
+  if (existingUsers > 0 && process.env.SEED_RESET !== 'true') {
+    throw new Error(
+      `Database already has ${existingUsers} user(s). The seed would DELETE ALL DATA. Re-run with SEED_RESET=true only if that is intended.`
+    );
+  }
+  if (process.env.NODE_ENV === 'production' && !process.env.ADMIN_PASSWORD) {
+    throw new Error('Set ADMIN_PASSWORD before seeding production; the default demo password is public.');
+  }
+
   // 1. Clean existing database
   await prisma.notification.deleteMany();
   await prisma.pushSubscription.deleteMany();
@@ -54,7 +69,7 @@ async function main() {
     },
   });
 
-  console.log(`✅ Admin created: ${admin.email} / ${adminPassword}`);
+  console.log(`✅ Admin created: ${admin.email}`);
 
   // 4. Academic Year
   const academicYear = await prisma.academicYear.create({
@@ -356,7 +371,7 @@ async function main() {
   console.log('\n--- Credentials for testing ---');
   console.log('Admin:');
   console.log(`  Email: ${adminEmail}`);
-  console.log(`  Password: ${adminPassword}`);
+  console.log(process.env.ADMIN_PASSWORD ? '  Password: (from ADMIN_PASSWORD)' : `  Password: ${adminPassword} (demo default)`);
   console.log('\nStudent 1 (Sem 5, CSE, Sec A):');
   console.log('  USN: 1MS21CS001');
   console.log('  Semester: 5');

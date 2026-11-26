@@ -14,6 +14,7 @@ export interface StudentProfile {
   usn: string;
   name: string;
   email?: string;
+  batch?: string | null;
   semester: {
     id: string;
     number: number;
@@ -58,6 +59,9 @@ export interface TodayClass {
   type: ClassType;
   faculty?: string;
   room?: string;
+  batch?: string;
+  subjectId?: string | null;
+  appliesToMe?: boolean;
   subject: {
     id: string;
     code: string;
