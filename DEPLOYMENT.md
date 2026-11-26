@@ -71,9 +71,11 @@ graph LR
 7. **Initialize Database Tables & Seed Data**:
    * In your backend service on Railway $\rightarrow$ Click the **"Settings"** or **"Deploy"** tab $\rightarrow$ Open **"Terminal"** (or CLI):
      ```bash
-     npm run deploy:init
+     ADMIN_PASSWORD='choose-a-strong-one' SEED_ALLOW_PRODUCTION=true npm run deploy:init
      ```
-   * This creates all database tables and seeds the demo student (`1MS21CS001`) and admin (`admin@college.edu`).
+   * This creates all database tables and seeds the demo student (`1MS21CS001`) and an admin (`admin@college.edu`, using `ADMIN_PASSWORD`).
+   * **Run this only once, on an empty database.** The seed deletes every table first, so it refuses to run if any users already exist (override with `SEED_RESET=true` only if you really want to wipe everything).
+   * After pulling schema changes later, apply them with `npm run prisma:push` (this never deletes data rows), not `deploy:init`.
 
 ---
 
