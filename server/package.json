@@ -12,7 +12,8 @@
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "seed": "tsx prisma/seed.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:integration": "prisma db push --skip-generate && vitest run"
   },
   "dependencies": {
     "@prisma/client": "^6.4.1",
