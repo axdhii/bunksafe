@@ -10,6 +10,7 @@ export interface ParsedTimetableRow {
   faculty?: string;
   room?: string;
   type: 'LECTURE' | 'LAB' | 'TUTORIAL';
+  batch: string; // "ALL" or a lab batch like "A1"
 }
 
 export interface ValidationError {
@@ -50,30 +51,45 @@ export function parseDay(raw: any): { dayOfWeek: number; dayName: string } | nul
   return { dayOfWeek, dayName: DAY_NAMES[dayOfWeek] };
 }
 
+/**
+ * Accepts "09:00", "9:00", "900", "9.30", "2:00 PM", and Excel time cells (fractions of a day, e.g. 0.375).
+ * Returns "HH:MM" (24-hour) or null.
+ */
 export function normalizeTime(raw: any): string | null {
-  if (!raw) return null;
-  let str = String(raw).trim();
-  // Handle numbers from Excel (e.g., decimal time representation or 900)
-  if (!str.includes(':')) {
-    if (/^\d{3,4}$/.test(str)) {
-      const padded = str.padStart(4, '0');
-      str = `${padded.slice(0, 2)}:${padded.slice(2)}`;
-    } else {
-      return null;
-    }
+  if (raw === null || raw === undefined || raw === '') return null;
+
+  // Excel stores times as a fraction of a day
+  if (typeof raw === 'number' && raw > 0 && raw < 1) {
+    const total = Math.round(raw * 24 * 60);
+    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
   }
-  const match = str.match(/^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$/);
+
+  let str = String(raw).trim().toUpperCase().replace(/\s+/g, '');
+  const meridiem = str.match(/(AM|PM|A\.M\.|P\.M\.)$/)?.[1];
+  if (meridiem) str = str.slice(0, -meridiem.length);
+  str = str.replace('.', ':');
+  if (/^\d{3,4}$/.test(str)) str = `${str.padStart(4, '0').slice(0, 2)}:${str.padStart(4, '0').slice(2)}`;
+  else if (/^\d{1,2}$/.test(str) && meridiem) str = `${str}:00`;
+
+  const match = str.match(/^(\d{1,2}):([0-5]\d)$/);
   if (!match) return null;
-  const h = match[1].padStart(2, '0');
-  const m = match[2];
-  return `${h}:${m}`;
+  let h = Number(match[1]);
+  if (meridiem) {
+    if (h < 1 || h > 12) return null;
+    if (meridiem.startsWith('P') && h !== 12) h += 12;
+    if (meridiem.startsWith('A') && h === 12) h = 0;
+  } else if (h > 23) {
+    return null;
+  }
+  return `${String(h).padStart(2, '0')}:${match[2]}`;
 }
 
 export function parseTimetableBuffer(
   buffer: Buffer,
   fileType: 'csv' | 'xlsx'
 ): TimetableParseResult {
-  const workbook = xlsx.read(buffer, { type: 'buffer' });
+  // sheetRows stops parsing after the header + 500 data rows, so huge sheets cannot exhaust memory
+  const workbook = xlsx.read(buffer, { type: 'buffer', sheetRows: 502 });
   if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
     throw new Error('Invalid spreadsheet: No sheets found in workbook.');
   }
@@ -84,7 +100,6 @@ export function parseTimetableBuffer(
     throw new Error('Invalid spreadsheet: First sheet is empty or corrupted.');
   }
 
-  // Parse rows with an upper bound of 500 rows to prevent DOS payload expansion
   const rawJson: any[] = xlsx.utils.sheet_to_json(worksheet, { defval: '' });
   const jsonData = rawJson.slice(0, 500);
 
@@ -95,7 +110,7 @@ export function parseTimetableBuffer(
   if (rawJson.length > 500) {
     warnings.push({
       rowNumber: 501,
-      message: `File contains ${rawJson.length} rows. Only the first 500 rows were parsed.`,
+      message: 'File contains more than 500 rows. Only the first 500 rows were parsed.',
     });
   }
 
@@ -108,14 +123,20 @@ export function parseTimetableBuffer(
       const k = keys.find((key) => key !== '__proto__' && key !== 'constructor' && key !== 'prototype' && pattern.test(key));
       return k && Object.prototype.hasOwnProperty.call(row, k) ? String(row[k]).trim() : '';
     };
+    // Same lookup, but keeps numbers as-is (Excel time cells arrive as fractions of a day)
+    const findRaw = (pattern: RegExp) => {
+      const k = keys.find((key) => key !== '__proto__' && key !== 'constructor' && key !== 'prototype' && pattern.test(key));
+      return k && Object.prototype.hasOwnProperty.call(row, k) ? row[k] : '';
+    };
 
     const dayRaw = findVal(/day/i);
-    const startRaw = findVal(/start/i);
-    const endRaw = findVal(/end/i);
-    const subjectRaw = findVal(/sub(ject)?[\s_-]?(code)?/i);
+    const startRaw = findRaw(/start|from/i);
+    const endRaw = findRaw(/^\s*end|end[\s_-]*time|^\s*to\s*$/i);
+    const subjectRaw = findVal(/sub(ject)?[\s_-]?(code)?/i).toUpperCase();
     const facultyRaw = findVal(/faculty|teacher|prof/i);
-    const roomRaw = findVal(/room|hall|lab/i);
+    const roomRaw = findVal(/room|hall|venue/i);
     const typeRaw = findVal(/type|mode/i).toUpperCase();
+    const batchRaw = findVal(/batch|group/i).toUpperCase();
 
     // 1. Validate Day
     const dayParsed = parseDay(dayRaw);
@@ -123,7 +144,7 @@ export function parseTimetableBuffer(
       errors.push({
         rowNumber,
         field: 'Day',
-        message: `Invalid day "${dayRaw}". Expected Monday to Saturday.`,
+        message: `Invalid day "${dayRaw}". Expected Monday to Sunday.`,
       });
       return;
     }
@@ -174,6 +195,12 @@ export function parseTimetableBuffer(
     if (typeRaw.includes('LAB')) classType = 'LAB';
     else if (typeRaw.includes('TUT')) classType = 'TUTORIAL';
 
+    const batch = !batchRaw || batchRaw === 'ALL' ? 'ALL' : batchRaw;
+    if (batch !== 'ALL' && !/^[A-Z]?\d$/.test(batch)) {
+      errors.push({ rowNumber, field: 'Batch', message: `Invalid batch "${batchRaw}". Use ALL, or a code like A1 / B2.` });
+      return;
+    }
+
     // Warnings
     if (!roomRaw) {
       warnings.push({
@@ -192,6 +219,7 @@ export function parseTimetableBuffer(
       faculty: facultyRaw || undefined,
       room: roomRaw || undefined,
       type: classType,
+      batch,
     });
   });
 
@@ -215,6 +243,7 @@ export function parseTimetableBuffer(
         if (b.startTime >= a.endTime) {
           break;
         }
+        if (a.batch !== 'ALL' && b.batch !== 'ALL' && a.batch !== b.batch) continue; // parallel split lab
         const first = a.rowNumber < b.rowNumber ? a : b;
         const second = a.rowNumber < b.rowNumber ? b : a;
         warnings.push({

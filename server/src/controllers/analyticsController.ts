@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../prisma/client.js';
 import { calculateAttendance } from '../utils/attendanceEngine.js';
+import { parseThreshold } from './academicController.js';
 
 export async function getStudentWeeklyAnalytics(req: Request, res: Response): Promise<void> {
   try {
@@ -52,8 +53,8 @@ export async function getStudentWeeklyAnalytics(req: Request, res: Response): Pr
         if (isPres) s.attended++;
 
         // Day of week from record date
-        const d = new Date(r.date);
-        const dayIdx = d.getDay() === 0 ? 7 : d.getDay();
+        const d = new Date(`${r.date}T00:00:00Z`); // calendar date, independent of server timezone
+        const dayIdx = d.getUTCDay() === 0 ? 7 : d.getUTCDay();
         if (dayMap[dayIdx]) {
           dayMap[dayIdx].conducted++;
           if (isPres) dayMap[dayIdx].attended++;
@@ -82,7 +83,7 @@ export async function getStudentWeeklyAnalytics(req: Request, res: Response): Pr
     }
 
     const DAY_NAMES = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const dayWiseDistribution = [1, 2, 3, 4, 5, 6].map((dayNum) => {
+    const dayWiseDistribution = [1, 2, 3, 4, 5, 6, ...(dayMap[7].conducted > 0 ? [7] : [])].map((dayNum) => {
       const stats = dayMap[dayNum];
       const percentage = stats.conducted > 0 ? Math.round((stats.attended / stats.conducted) * 100) : 0;
       return {
@@ -110,86 +111,76 @@ export async function getStudentWeeklyAnalytics(req: Request, res: Response): Pr
 
 export async function getAdminAttendanceOverview(req: Request, res: Response): Promise<void> {
   try {
-    // PERF-1: Aggregate attendance counts at DB level instead of loading all records
-    const [thresholdSetting, totalStudentsCount, attendanceAggregates] = await Promise.all([
-      prisma.systemSetting.findUnique({
-        where: { key: 'MINIMUM_ATTENDANCE_THRESHOLD' },
-      }),
-      prisma.student.count(),
-      // Group attendance counts by student at the DB level
+    const [thresholdSetting, activeStudents, subjects, counts] = await Promise.all([
+      prisma.systemSetting.findUnique({ where: { key: 'MINIMUM_ATTENDANCE_THRESHOLD' } }),
+      prisma.student.findMany({ where: { active: true }, select: { id: true } }),
+      prisma.subject.findMany({ select: { id: true, minimumThreshold: true } }),
+      // Per student, per subject, per status counts aggregated in the DB
       prisma.attendance.groupBy({
-        by: ['studentId'],
-        _count: {
-          id: true,
-        },
-        where: {
-          status: { in: ['PRESENT', 'ABSENT'] },
-        },
+        by: ['studentId', 'subjectId', 'status'],
+        _count: { id: true },
+        where: { status: { in: ['PRESENT', 'ABSENT'] }, student: { active: true } },
       }),
     ]);
 
-    const defaultThreshold = thresholdSetting ? parseFloat(thresholdSetting.value) : 85.0;
+    const defaultThreshold = parseThreshold(thresholdSetting?.value) ?? 85.0;
+    const thresholdBySubject = new Map(subjects.map((s) => [s.id, s.minimumThreshold]));
 
-    // Get present counts per student
-    const presentCounts = await prisma.attendance.groupBy({
-      by: ['studentId'],
-      _count: { id: true },
-      where: { status: 'PRESENT' },
-    });
+    // studentId -> subjectId -> { attended, conducted }
+    const perStudent = new Map<string, Map<string, { attended: number; conducted: number }>>();
+    for (const c of counts) {
+      const bySubject = perStudent.get(c.studentId) || new Map();
+      perStudent.set(c.studentId, bySubject);
+      const cell = bySubject.get(c.subjectId) || { attended: 0, conducted: 0 };
+      cell.conducted += c._count.id;
+      if (c.status === 'PRESENT') cell.attended += c._count.id;
+      bySubject.set(c.subjectId, cell);
+    }
 
-    const presentMap = new Map(presentCounts.map((p) => [p.studentId, p._count.id]));
-
+    const rank = { SAFE: 0, WARNING: 1, CRITICAL: 2 } as const;
     let safeCount = 0;
     let warningCount = 0;
     let criticalCount = 0;
-    const criticalStudentIds: string[] = [];
+    const critical: { id: string; percentage: number; recoveryRequired: number }[] = [];
 
-    for (const agg of attendanceAggregates) {
-      const conducted = agg._count.id;
-      const attended = presentMap.get(agg.studentId) || 0;
-      const metrics = calculateAttendance(attended, conducted, defaultThreshold);
-
-      if (metrics.risk === 'CRITICAL') {
+    for (const { id } of activeStudents) {
+      // A student's risk is their worst subject, each judged against that subject's own threshold
+      let worst: ReturnType<typeof calculateAttendance> | null = null;
+      for (const [subjectId, cell] of perStudent.get(id) || []) {
+        const m = calculateAttendance(cell.attended, cell.conducted, thresholdBySubject.get(subjectId) ?? defaultThreshold);
+        if (!worst || rank[m.risk] > rank[worst.risk] || (m.risk === worst.risk && m.percentage < worst.percentage)) worst = m;
+      }
+      const risk = worst?.risk ?? 'SAFE';
+      if (risk === 'CRITICAL') {
         criticalCount++;
-        criticalStudentIds.push(agg.studentId);
-      } else if (metrics.risk === 'WARNING') {
-        warningCount++;
-      } else {
-        safeCount++;
-      }
+        critical.push({ id, percentage: worst!.percentage, recoveryRequired: worst!.recoveryRequired });
+      } else if (risk === 'WARNING') warningCount++;
+      else safeCount++;
     }
 
-    // Students with no attendance records at all are SAFE
-    const studentsWithRecords = attendanceAggregates.length;
-    safeCount += (totalStudentsCount - studentsWithRecords);
-
-    // Only fetch full details for at-risk students (max 20)
-    const atRiskStudents: any[] = [];
-    if (criticalStudentIds.length > 0) {
-      const criticalStudents = await prisma.student.findMany({
-        where: { id: { in: criticalStudentIds.slice(0, 20) } },
-        include: { semester: true, branch: true, section: true },
-      });
-
-      for (const st of criticalStudents) {
-        const conducted = attendanceAggregates.find((a) => a.studentId === st.id)?._count.id || 0;
-        const attended = presentMap.get(st.id) || 0;
-        const metrics = calculateAttendance(attended, conducted, defaultThreshold);
-        atRiskStudents.push({
-          id: st.id,
-          usn: st.usn,
-          name: st.name,
-          semester: st.semester.number,
-          branch: st.branch.code,
-          section: st.section.name,
-          percentage: metrics.percentage,
-          recoveryRequired: metrics.recoveryRequired,
-        });
-      }
-    }
+    critical.sort((a, b) => a.percentage - b.percentage);
+    const top = critical.slice(0, 20);
+    const details = await prisma.student.findMany({
+      where: { id: { in: top.map((c) => c.id) } },
+      include: { semester: true, branch: true, section: true },
+    });
+    const byId = new Map(details.map((st) => [st.id, st]));
+    const atRiskStudents = top.map((c) => {
+      const st = byId.get(c.id)!;
+      return {
+        id: st.id,
+        usn: st.usn,
+        name: st.name,
+        semester: st.semester.number,
+        branch: st.branch.code,
+        section: st.section.name,
+        percentage: c.percentage, // lowest subject percentage
+        recoveryRequired: c.recoveryRequired,
+      };
+    });
 
     res.json({
-      totalStudents: totalStudentsCount,
+      totalStudents: activeStudents.length,
       threshold: defaultThreshold,
       distribution: {
         safe: safeCount,
