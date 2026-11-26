@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../prisma/client.js';
-import { sendSmartNotification } from '../services/notificationService.js';
+import { sendPushToStudent, isAllowedPushEndpoint } from '../services/notificationService.js';
 import { logAuditAction } from '../services/auditService.js';
 
 export async function getNotifications(req: Request, res: Response): Promise<void> {
@@ -77,11 +77,24 @@ export async function updatePreferences(req: Request, res: Response): Promise<vo
       quietHoursEnd,
     } = req.body;
 
+    const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+    for (const t of [quietHoursStart, quietHoursEnd]) {
+      if (t !== undefined && !HHMM.test(String(t))) {
+        res.status(400).json({ error: 'Quiet hours must be in HH:MM (24-hour) format.' });
+        return;
+      }
+    }
+    const minutes = reminderMinutesBefore !== undefined ? Number(reminderMinutesBefore) : undefined;
+    if (minutes !== undefined && (!Number.isInteger(minutes) || minutes < 0 || minutes > 240)) {
+      res.status(400).json({ error: 'Reminder time must be a whole number of minutes between 0 and 240.' });
+      return;
+    }
+
     const pref = await prisma.notificationPreference.upsert({
       where: { studentId },
       update: {
         classReminders: classReminders !== undefined ? Boolean(classReminders) : undefined,
-        reminderMinutesBefore: reminderMinutesBefore !== undefined ? Number(reminderMinutesBefore) : undefined,
+        reminderMinutesBefore: minutes,
         attendanceWarnings: attendanceWarnings !== undefined ? Boolean(attendanceWarnings) : undefined,
         skipWarnings: skipWarnings !== undefined ? Boolean(skipWarnings) : undefined,
         recoveryNotifications: recoveryNotifications !== undefined ? Boolean(recoveryNotifications) : undefined,
@@ -94,7 +107,7 @@ export async function updatePreferences(req: Request, res: Response): Promise<vo
       create: {
         studentId,
         classReminders: Boolean(classReminders),
-        reminderMinutesBefore: Number(reminderMinutesBefore) || 30,
+        reminderMinutesBefore: minutes ?? 30,
         attendanceWarnings: Boolean(attendanceWarnings),
         skipWarnings: Boolean(skipWarnings),
         recoveryNotifications: Boolean(recoveryNotifications),
@@ -117,7 +130,7 @@ export async function subscribePush(req: Request, res: Response): Promise<void> 
     const studentId = req.user!.studentId!;
     const { endpoint, keys } = req.body;
 
-    if (!endpoint || !keys?.p256dh || !keys?.auth) {
+    if (!isAllowedPushEndpoint(endpoint) || typeof keys?.p256dh !== 'string' || typeof keys?.auth !== 'string') {
       res.status(400).json({ error: 'Invalid push subscription payload.' });
       return;
     }
@@ -143,6 +156,15 @@ export async function subscribePush(req: Request, res: Response): Promise<void> 
       },
     });
 
+    // Keep only the 5 most recent devices per student
+    const stale = await prisma.pushSubscription.findMany({
+      where: { studentId },
+      orderBy: { createdAt: 'desc' },
+      skip: 5,
+      select: { id: true },
+    });
+    if (stale.length) await prisma.pushSubscription.deleteMany({ where: { id: { in: stale.map((s) => s.id) } } });
+
     res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to register push subscription.' });
@@ -158,6 +180,11 @@ export async function broadcastAnnouncement(req: Request, res: Response): Promis
       return;
     }
 
+    if (String(title).length > 120 || String(message).length > 2000) {
+      res.status(400).json({ error: 'Title must be at most 120 characters and message at most 2000.' });
+      return;
+    }
+
     const where: any = { active: true };
     if (semesterId) where.semesterId = semesterId;
     if (branchId) where.branchId = branchId;
@@ -170,33 +197,20 @@ export async function broadcastAnnouncement(req: Request, res: Response): Promis
       await prisma.notification.createMany({
         data: students.map((s) => ({
           studentId: s.id,
-          title,
-          message,
+          title: String(title),
+          message: String(message),
           category: 'SYSTEM',
           isRead: false,
         })),
       });
 
-      // Fan out push notifications asynchronously (fire-and-forget, don't block response)
-      // Process in chunks of 50 to avoid overwhelming the push service
+      // Inbox rows are created above; only push here (sendSmartNotification would insert a second copy).
+      // Awaited: serverless hosts freeze the function once the response is sent.
+      // shortcut: very large cohorts may hit the function timeout; move to a queue if broadcasts exceed a few thousand students.
       const CHUNK_SIZE = 50;
-      const sendPushes = async () => {
-        for (let i = 0; i < students.length; i += CHUNK_SIZE) {
-          const chunk = students.slice(i, i + CHUNK_SIZE);
-          await Promise.allSettled(
-            chunk.map((s) =>
-              sendSmartNotification({
-                studentId: s.id,
-                title,
-                message,
-                category: 'SYSTEM',
-                isUrgent: true,
-              }).catch(() => {}) // Swallow individual push failures
-            )
-          );
-        }
-      };
-      sendPushes().catch(console.error); // Fire and forget
+      for (let i = 0; i < students.length; i += CHUNK_SIZE) {
+        await Promise.all(students.slice(i, i + CHUNK_SIZE).map((s) => sendPushToStudent(s.id, title, message, 'SYSTEM')));
+      }
     }
 
     await logAuditAction({

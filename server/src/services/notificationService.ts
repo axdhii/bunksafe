@@ -38,13 +38,19 @@ export interface NotificationPayload {
  * quietHoursStart and quietHoursEnd are "HH:MM" in 24h format.
  */
 export function isWithinQuietHours(start: string, end: string, checkDate: Date = new Date()): boolean {
-  const currentMinutes = checkDate.getHours() * 60 + checkDate.getMinutes();
+  // Students set quiet hours in campus time; the server usually runs in UTC
+  const [h, m] = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    .format(checkDate)
+    .split(':')
+    .map(Number);
+  const currentMinutes = h * 60 + m;
 
   const [startHour, startMin] = start.split(':').map(Number);
   const [endHour, endMin] = end.split(':').map(Number);
 
   const startTotal = startHour * 60 + startMin;
   const endTotal = endHour * 60 + endMin;
+  if (!Number.isFinite(startTotal) || !Number.isFinite(endTotal)) return false;
 
   if (startTotal <= endTotal) {
     // e.g. 01:00 to 06:00
@@ -112,41 +118,52 @@ export async function sendSmartNotification(payload: NotificationPayload): Promi
   });
 
   // 4. Dispatch Web Push if subscriptions exist
-  try {
-    const subscriptions = await prisma.pushSubscription.findMany({
-      where: { studentId },
-    });
+  await sendPushToStudent(studentId, title, message, category);
 
+  return true;
+}
+
+/** Sends a web push to every device of one student; expired subscriptions are removed. Never throws. */
+export async function sendPushToStudent(studentId: string, title: string, message: string, category: NotificationCategory): Promise<void> {
+  try {
+    const subscriptions = await prisma.pushSubscription.findMany({ where: { studentId } });
     const pushPayload = JSON.stringify({
       title,
       body: message,
       icon: '/pwa-192x192.png',
       badge: '/favicon.svg',
-      data: { category, studentId },
+      data: { category },
     });
 
-    for (const sub of subscriptions) {
-      try {
-        await webpush.sendNotification(
-          {
-            endpoint: sub.endpoint,
-            keys: {
-              p256dh: sub.p256dh,
-              auth: sub.auth,
-            },
-          },
-          pushPayload
-        );
-      } catch (err: any) {
-        if (err.statusCode === 404 || err.statusCode === 410) {
-          // Subscription expired or invalid; clean it up
-          await prisma.pushSubscription.delete({ where: { id: sub.id } }).catch(() => {});
+    await Promise.all(
+      // Re-check stored endpoints too: rows saved before the allowlist existed are skipped
+      subscriptions.filter((sub) => isAllowedPushEndpoint(sub.endpoint)).map(async (sub) => {
+        try {
+          await webpush.sendNotification(
+            { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+            pushPayload,
+            { timeout: 5000 }
+          );
+        } catch (err: any) {
+          if (err.statusCode === 404 || err.statusCode === 410) {
+            await prisma.pushSubscription.delete({ where: { id: sub.id } }).catch(() => {});
+          }
         }
-      }
-    }
-  } catch (err) {
+      })
+    );
+  } catch {
     // Non-fatal if web push is not configured or fails
   }
+}
 
-  return true;
+const PUSH_HOSTS = [/^fcm\.googleapis\.com$/, /(^|\.)push\.services\.mozilla\.com$/, /(^|\.)notify\.windows\.com$/, /(^|\.)push\.apple\.com$/];
+
+/** Only real browser push services; anything else would make the server POST to arbitrary URLs. */
+export function isAllowedPushEndpoint(endpoint: unknown): boolean {
+  try {
+    const url = new URL(String(endpoint));
+    return url.protocol === 'https:' && !url.port && PUSH_HOSTS.some((re) => re.test(url.hostname));
+  } catch {
+    return false;
+  }
 }
