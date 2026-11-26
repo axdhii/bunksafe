@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, Plus, Search, Trash2, Edit2, AlertTriangle, Sparkles, Filter } from 'lucide-react';
+import { Users, Plus, Search, Trash2, Edit2, AlertTriangle, Sparkles, Filter, KeyRound } from 'lucide-react';
 import { apiRequest } from '../../api/client';
 import { Modal } from '../../components/common/Modal';
 import { PageHeader } from '../../components/common/PageHeader';
@@ -129,6 +129,17 @@ export const AdminStudents: React.FC = () => {
       setErrorMessage(err.message || 'Failed to delete student.');
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleResetPassword = async (st: any) => {
+    if (!window.confirm(`Clear the password for ${st.usn}? They will be signed out everywhere and must register again with their full name to set a new one.`)) return;
+    setErrorMessage(null);
+    try {
+      const res = await apiRequest<{ message: string }>(`/academic/students/${st.id}/reset-password`, { method: 'POST' });
+      alert(res.message);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to reset password.');
     }
   };
 
@@ -292,6 +303,14 @@ export const AdminStudents: React.FC = () => {
                         title="Edit Student"
                       >
                         <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleResetPassword(st)}
+                        className="p-1.5 text-zinc-400 hover:text-white rounded-lg transition-colors"
+                        title="Reset Password"
+                        aria-label={`Reset password for ${st.usn}`}
+                      >
+                        <KeyRound className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => setDeleteTarget(st)}

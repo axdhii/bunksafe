@@ -29,6 +29,7 @@ import { RiskBadge } from '../../components/common/Badge';
 import { Modal } from '../../components/common/Modal';
 import { useOfflineSync } from '../../hooks/useOfflineSync';
 import { calculateAttendance } from '../../utils/attendanceMath';
+import { collegeToday } from '../../utils/collegeDate';
 import { SpotlightCard } from '../../components/common/SpotlightCard';
 
 export const StudentDashboard: React.FC = () => {
@@ -39,8 +40,20 @@ export const StudentDashboard: React.FC = () => {
   const [showMarkAllModal, setShowMarkAllModal] = useState(false);
   const [markAllLoading, setMarkAllLoading] = useState(false);
 
-  // Batch Filter for Split Labs (Default B1)
+  // Batch Filter for Split Labs. B1/B2 is saved as the student's batch (used by "Mark all present");
+  // ALL is only a view option.
   const [activeBatchFilter, setActiveBatchFilter] = useState<'ALL' | 'B1' | 'B2'>('B1');
+  const chooseBatch = async (batch: 'ALL' | 'B1' | 'B2') => {
+    const previous = activeBatchFilter;
+    setActiveBatchFilter(batch);
+    if (batch === 'ALL') return;
+    try {
+      await apiRequest('/attendance/batch', { method: 'PUT', data: { batch } });
+    } catch (err: any) {
+      setActiveBatchFilter(previous);
+      alert(err.message || 'Could not save your batch.');
+    }
+  };
 
   const { isOnline, queueAttendance } = useOfflineSync();
 
@@ -49,6 +62,9 @@ export const StudentDashboard: React.FC = () => {
       setError(null);
       const res = await apiRequest<DashboardData>('/attendance/dashboard');
       setData(res);
+      const saved = res.student?.batch?.trim().toUpperCase();
+      if (saved?.endsWith('1')) setActiveBatchFilter('B1');
+      else if (saved?.endsWith('2')) setActiveBatchFilter('B2');
     } catch (err: any) {
       setError(err.message || 'Failed to load dashboard data.');
     } finally {
@@ -117,7 +133,7 @@ export const StudentDashboard: React.FC = () => {
         await queueAttendance({
           subjectId: item.subject.id,
           timetableEntryId: item.id,
-          date: new Date().toISOString().split('T')[0],
+          date: collegeToday(),
           status,
         });
       } else {
@@ -126,7 +142,7 @@ export const StudentDashboard: React.FC = () => {
           data: {
             subjectId: item.subject.id,
             timetableEntryId: item.id,
-            date: new Date().toISOString().split('T')[0],
+            date: collegeToday(),
             status,
           },
         });
@@ -150,7 +166,7 @@ export const StudentDashboard: React.FC = () => {
     try {
       await apiRequest('/attendance/mark-all-today', {
         method: 'POST',
-        data: { date: new Date().toISOString().split('T')[0] },
+        data: { date: collegeToday() },
       });
       setShowMarkAllModal(false);
       confetti({
@@ -392,7 +408,7 @@ export const StudentDashboard: React.FC = () => {
             {/* Batch Selector Pill */}
             <div className="flex items-center p-1 rounded-2xl liquid-glass border border-white/10 text-xs">
               <button
-                onClick={() => setActiveBatchFilter('B1')}
+                onClick={() => chooseBatch('B1')}
                 className={`px-3 py-1 rounded-xl text-xs transition-all active:scale-95 ${
                   activeBatchFilter === 'B1'
                     ? 'bg-white text-black font-bold shadow-sm'
@@ -402,7 +418,7 @@ export const StudentDashboard: React.FC = () => {
                 Batch 1
               </button>
               <button
-                onClick={() => setActiveBatchFilter('B2')}
+                onClick={() => chooseBatch('B2')}
                 className={`px-3 py-1 rounded-xl text-xs transition-all active:scale-95 ${
                   activeBatchFilter === 'B2'
                     ? 'bg-white text-black font-bold shadow-sm'
@@ -412,7 +428,7 @@ export const StudentDashboard: React.FC = () => {
                 Batch 2
               </button>
               <button
-                onClick={() => setActiveBatchFilter('ALL')}
+                onClick={() => chooseBatch('ALL')}
                 className={`px-3 py-1 rounded-xl text-xs transition-all active:scale-95 ${
                   activeBatchFilter === 'ALL'
                     ? 'bg-white text-black font-bold shadow-sm'
@@ -598,7 +614,7 @@ export const StudentDashboard: React.FC = () => {
       <Modal isOpen={showMarkAllModal} onClose={() => setShowMarkAllModal(false)} title="Confirm Bulk Attendance">
         <div className="space-y-4">
           <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed font-sub">
-            Mark all <strong className="text-white font-sans">{data.todayClasses.filter((c: any) => c.subjectId).length} scheduled classes</strong> for today as <strong className="text-white font-sans">PRESENT</strong>?
+            Mark all <strong className="text-white font-sans">{data.todayClasses.filter((c) => c.subjectId && c.appliesToMe !== false && !c.status).length} unmarked classes</strong> in your batch for today as <strong className="text-white font-sans">PRESENT</strong>?
           </p>
           <div className="flex items-center justify-end gap-2 pt-2">
             <button

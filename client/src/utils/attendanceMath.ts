@@ -20,7 +20,8 @@ export function calculateAttendanceMetrics(
   conducted: number,
   threshold: number = 85.0
 ): CalculationResult {
-  const t = threshold / 100.0;
+  // Thresholds must be in (0, 100); 100% would make recovery impossible (division by zero)
+  const t = Math.min(Math.max(threshold, 0.1), 99.9) / 100.0;
   
   // Edge case: No classes conducted yet
   if (conducted <= 0) {
@@ -39,7 +40,8 @@ export function calculateAttendanceMetrics(
 
   const absent = Math.max(0, conducted - attended);
   const currentRatio = attended / conducted;
-  const percentage = Math.round(currentRatio * 1000) / 10; // 1 decimal point precision
+  // Truncate (not round) so the shown % never reaches the threshold while the student is below it
+  const percentage = Math.floor(currentRatio * 1000 + 1e-9) / 10;
 
   // Safe Skips: Max classes that can be missed while ratio >= threshold
   let safeSkips = 0;
@@ -59,9 +61,9 @@ export function calculateAttendanceMetrics(
 
   // Risk Classification
   let risk: RiskLevel = 'SAFE';
-  if (percentage < threshold) {
+  if (currentRatio < t - 1e-12) {
     risk = 'CRITICAL';
-  } else if (percentage < threshold + 3.0 || safeSkips <= 1) {
+  } else if (currentRatio * 100 < t * 100 + 3.0 || safeSkips <= 1) {
     risk = 'WARNING';
   } else {
     risk = 'SAFE';

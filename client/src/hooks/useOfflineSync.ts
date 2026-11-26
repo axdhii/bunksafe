@@ -44,12 +44,16 @@ export function useOfflineSync() {
 
     setIsSyncing(true);
     try {
-      await apiRequest('/attendance/sync', {
+      const res = await apiRequest<{ processed?: string[]; rejected?: string[] }>('/attendance/sync', {
         method: 'POST',
         data: { items: queue },
       });
-      // Clear queue on success
-      saveQueue([]);
+      // Remove only what the server handled; marks queued while this request was in flight stay queued
+      const done = new Set(res?.processed ?? queue.map((q) => q.syncId));
+      saveQueue(getQueue().filter((q) => !done.has(q.syncId)));
+      if (res?.rejected?.length) {
+        console.warn(`${res.rejected.length} offline attendance mark(s) were rejected by the server and discarded.`);
+      }
     } catch (err) {
       console.warn('Offline sync failed, will retry on next connection:', err);
     } finally {
