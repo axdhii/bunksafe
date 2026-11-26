@@ -83,6 +83,7 @@ const apiGeneralLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests. Please slow down.' },
+  skip: () => process.env.NODE_ENV === 'test',
 });
 app.use('/api', apiGeneralLimiter);
 
@@ -114,11 +115,14 @@ app.use('/api', apiRouter);
 
 // Global Error Handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Unhandled Server Error:', err);
-  const status = err.status || 500;
-  const message = process.env.NODE_ENV === 'production'
-    ? 'An unexpected error occurred. Please try again later.'
-    : err.message || 'Internal Server Error';
+  // Client errors (bad upload type/size, malformed JSON) keep their message; server errors stay generic
+  const status = err.name === 'MulterError' ? 400 : err.status || err.statusCode || 500;
+  if (status >= 500) console.error('Unhandled Server Error:', err);
+  const message = status < 500
+    ? (err.name === 'MulterError' && err.code === 'LIMIT_FILE_SIZE' ? 'File is too large.' : err.message || 'Bad request.')
+    : process.env.NODE_ENV === 'production'
+      ? 'An unexpected error occurred. Please try again later.'
+      : err.message || 'Internal Server Error';
 
   res.status(status).json({ error: message });
 });

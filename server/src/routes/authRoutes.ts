@@ -7,6 +7,7 @@ import {
   adminLogin,
   getMe,
   logout,
+  changePassword,
 } from '../controllers/authController.js';
 import { requireAuth } from '../middleware/auth.js';
 
@@ -14,6 +15,7 @@ import { requireAuth } from '../middleware/auth.js';
 const authBruteForceLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 15, // max 15 attempts per IP per window
+  skip: () => process.env.NODE_ENV === 'test',
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many authentication attempts. Please try again in 15 minutes.' },
@@ -27,5 +29,6 @@ router.post('/student/activate', authBruteForceLimiter, activateStudent);
 router.post('/admin/login', authBruteForceLimiter, adminLogin);
 router.get('/me', requireAuth, getMe);
 router.post('/logout', requireAuth, logout);
+router.post('/change-password', authBruteForceLimiter, requireAuth, changePassword);
 
 export default router;
